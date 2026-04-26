@@ -89,6 +89,7 @@ export interface PublicCheckIn {
   message: string;
   displayName: string;
   authorId?: string;  // resolved — may still be undefined for unresolvable legacy items
+  authorAvatarId?: string;
   imageUrl?: string;
 }
 
@@ -130,6 +131,7 @@ export function getPublicCheckIns(): PublicCheckIn[] {
             typeof ci.authorId === 'string' ? ci.authorId : undefined,
             displayName,
           ),
+          authorAvatarId: typeof ci.authorAvatarId === 'string' ? ci.authorAvatarId : undefined,
           imageUrl: sanitizeCoverImage(
             typeof ci.imageUrl === 'string' ? ci.imageUrl : undefined,
           ),

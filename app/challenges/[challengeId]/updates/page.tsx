@@ -11,6 +11,7 @@ import ReactionButton from '@/components/community/ReactionButton';
 import ReplyThread from '@/components/community/ReplyThread';
 import AuthorLink from '@/components/community/AuthorLink';
 import { getPublicCheckIns } from '@/lib/authorResolution';
+import { getAvatarById } from '@/lib/avatarLibrary';
 
 interface CheckIn {
   id: string;
@@ -21,6 +22,7 @@ interface CheckIn {
   message: string;
   displayName: string;
   authorId?: string;
+  authorAvatarId?: string;
   imageUrl?: string;
 }
 
@@ -119,11 +121,22 @@ export default function ChallengeUpdatesPage() {
           <div className="space-y-3">
             {checkIns.map((ci) => {
               const safeImage = sanitizeCoverImage(ci.imageUrl);
+              const ciAvatar = getAvatarById(ci.authorAvatarId);
+              const ciInitials = ci.displayName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('') || '?';
               return (
                 <div key={ci.id} className="rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] px-4 py-3.5 shadow-sm">
                   {/* Author + date */}
                   <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <AuthorLink authorId={ci.authorId} displayName={ci.displayName} />
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {ciAvatar ? (
+                        <img src={ciAvatar.imageSrc} alt={ciAvatar.id} className="h-6 w-6 rounded-full object-cover flex-none" />
+                      ) : (
+                        <div className="h-6 w-6 rounded-full flex-none flex items-center justify-center text-[10px] font-semibold text-white bg-[#6E8F7A]">
+                          {ciInitials}
+                        </div>
+                      )}
+                      <AuthorLink authorId={ci.authorId} displayName={ci.displayName} />
+                    </div>
                     <span className="text-[10px] text-[var(--color-text-muted)] flex-none">
                       {formatDate(ci.date)}
                     </span>

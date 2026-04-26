@@ -58,6 +58,7 @@ interface CheckIn {
   message: string;
   displayName: string;
   authorId?: string; // stable device ID for linking to public profile
+  authorAvatarId?: string;
   imageUrl?: string; // optional base64 data URL for progress photo
 }
 
@@ -696,11 +697,22 @@ export default function ChallengesPage() {
                 </div>
                 {visible.map((ci) => {
                   const safeImage = sanitizeCoverImage(ci.imageUrl);
+                  const ciAvatar = getAvatarById(ci.authorAvatarId);
+                  const ciInitials = ci.displayName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('') || '?';
                   return (
                     <div key={ci.id} className="rounded-xl bg-[var(--color-bg-soft)] px-3.5 py-3">
                       {/* Author + date */}
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <AuthorLink authorId={ci.authorId} displayName={ci.displayName} />
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {ciAvatar ? (
+                            <img src={ciAvatar.imageSrc} alt={ciAvatar.id} className="h-6 w-6 rounded-full object-cover flex-none" />
+                          ) : (
+                            <div className="h-6 w-6 rounded-full flex-none flex items-center justify-center text-[10px] font-semibold text-white bg-[#6E8F7A]">
+                              {ciInitials}
+                            </div>
+                          )}
+                          <AuthorLink authorId={ci.authorId} displayName={ci.displayName} />
+                        </div>
                         <span className="text-[10px] text-[var(--color-text-muted)] flex-none">
                           {new Date(ci.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                         </span>
@@ -814,6 +826,7 @@ export default function ChallengesPage() {
       message: msg,
       displayName: authorName,
       authorId: getOrCreateUserId(),
+      authorAvatarId: authorAvatarId,
       imageUrl: checkInImages[challenge.challengeId] || undefined,
     };
 
