@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --background: #FCFAF7;
+  --foreground: #2F2A26;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Color tokens */
+  --color-bg-canvas: #FCFAF7;
+  --color-bg-surface: #F6F1EA;
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-soft: #F3EEE6;
+  --color-border-subtle: #E6DED2;
+
+  --color-text-primary: #2F2A26;
+  --color-text-secondary: #6E645C;
+  --color-text-muted: #9A8F86;
+  --color-text-on-dark: #FFFFFF;
+
+  --color-brand-primary: #6E8F7A;
+  --color-brand-primary-hover: #5E7C68;
+  --color-brand-primary-soft: #E7F0EA;
+
+  --color-brand-secondary: #6D7FB3;
+  --color-brand-secondary-hover: #5F709F;
+  --color-brand-secondary-soft: #EBEEF8;
+
+  --color-brand-accent: #C98A84;
+  --color-brand-accent-soft: #F7E9E7;
+
+  --color-reward-primary: #E1A93A;
+  --color-reward-soft: #FFF4DB;
+  --color-reward-medium: #D4A23A;
+
+  --color-success: #5D8B6A;
+  --color-success-soft: #E8F3EB;
+  --color-success-medium: #6B9E7D;
+  --color-warning: #D9965B;
+  --color-warning-soft: #FFF0E2;
+  --color-warning-medium: #D99762;
+  --color-danger: #B96A73;
+  --color-danger-soft: #F8E8EB;
+
+  /* Typography */
+  --font-sans: 'Plus Jakarta Sans', 'Manrope', 'Inter', system-ui, sans-serif;
+
+  /* Spacing */
+  --spacing-1: 0.25rem; /* 4px */
+  --spacing-2: 0.5rem;  /* 8px */
+  --spacing-3: 0.75rem; /* 12px */
+  --spacing-4: 1rem;    /* 16px */
+  --spacing-5: 1.25rem; /* 20px */
+  --spacing-6: 1.5rem;  /* 24px */
+  --spacing-8: 2rem;    /* 32px */
+
+  /* Border radius */
+  --radius-sm: 0.875rem; /* 14px */
+  --radius-md: 1rem;     /* 16px */
+  --radius-lg: 1.25rem;  /* 20px */
+  --radius-xl: 1.5rem;   /* 24px */
+  --radius-2xl: 2.5rem;  /* 40px */
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
