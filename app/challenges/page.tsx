@@ -22,6 +22,8 @@ import ReplyThread from '@/components/community/ReplyThread';
 import AuthorLink from '@/components/community/AuthorLink';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import { getCurrentHabitStreak } from '@/lib/habitStats';
+import { getProfileData } from '@/lib/profile';
+import { getAvatarById } from '@/lib/avatarLibrary';
 
 
 interface Project {
@@ -73,7 +75,8 @@ export default function ChallengesPage() {
   const [isLoading, setIsLoading] = useState(true);
   // Merged project lookup: static curated + user-created (populated in useEffect)
   const [allProjects, setAllProjects] = useState<DiscoverProject[]>(projects as DiscoverProject[]);
-  const [displayName, setDisplayName] = useState('Anonymous');
+  const [authorName, setAuthorName] = useState('Anonymous');
+  const [authorAvatarId, setAuthorAvatarId] = useState<string | undefined>(undefined);
 
   const [checkInsByChallenge, setCheckInsByChallenge] = useState<Record<string, CheckIn[]>>({});
   const [checkInMessages, setCheckInMessages] = useState<Record<string, string>>({});
@@ -170,9 +173,9 @@ export default function ChallengesPage() {
 
 
   useEffect(() => {
-    // load display name
-    const savedName = localStorage.getItem('displayName');
-    if (savedName) setDisplayName(savedName);
+    const profile = getProfileData();
+    setAuthorName(profile.name || 'Anonymous');
+    setAuthorAvatarId(profile.avatarId);
 
     // === migration logic for active challenge storage ===
     const migrateAndReadActive = () => {
@@ -809,7 +812,7 @@ export default function ChallengesPage() {
       projectId: challenge.projectId,
       date: today,
       message: msg,
-      displayName,
+      displayName: authorName,
       authorId: getOrCreateUserId(),
       imageUrl: checkInImages[challenge.challengeId] || undefined,
     };
@@ -904,25 +907,28 @@ export default function ChallengesPage() {
           </div>
         )}
 
-        {/* global display name input */}
-        <div className="mt-6 rounded-xl bg-white p-6 shadow-sm">
-          <div className="mb-4">
-            <label className="block text-sm font-semibold text-neutral-900">
-              Display name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => {
-                const name = e.target.value || 'Anonymous';
-                setDisplayName(name);
-                localStorage.setItem('displayName', name);
-              }}
-              placeholder="Anonymous"
-              className="mt-2 w-full rounded-lg border border-neutral-300 p-3 text-sm text-neutral-900 placeholder-neutral-500"
-            />
-          </div>
-        </div>
+        {/* Author identity — sourced from Profile */}
+        {(() => {
+          const avatar = getAvatarById(authorAvatarId);
+          const initials =
+            authorName !== 'Anonymous'
+              ? authorName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('')
+              : null;
+          return authorName !== 'Anonymous' ? (
+            <div className="mt-4 flex items-center gap-2">
+              {avatar ? (
+                <img src={avatar.imageSrc} alt={avatar.id} className="h-6 w-6 rounded-full object-cover flex-none" />
+              ) : initials ? (
+                <div className="h-6 w-6 rounded-full flex-none flex items-center justify-center text-[10px] font-semibold text-white bg-[#6E8F7A]">
+                  {initials}
+                </div>
+              ) : null}
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Posting as <span className="font-medium text-[var(--color-text-secondary)]">{authorName}</span>
+              </p>
+            </div>
+          ) : null;
+        })()}
 
         {activeContent}
 

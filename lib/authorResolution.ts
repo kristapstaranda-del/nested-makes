@@ -49,14 +49,22 @@ export function resolveAuthorId(
   if (typeof window === 'undefined') return undefined;
 
   // Legacy backfill: try to match current device user by display name.
+  // Checks both the old standalone 'displayName' key and the current 'profileData' name.
   try {
-    const currentName = localStorage.getItem('displayName') ?? 'Anonymous';
     const currentId = localStorage.getItem('hobbyBuddyUserId');
-    if (currentId && displayName && displayName === currentName) {
-      return currentId;
+    if (currentId && displayName) {
+      const legacyName = localStorage.getItem('displayName');
+      if (legacyName && displayName === legacyName) return currentId;
+
+      const profileRaw = localStorage.getItem('profileData');
+      if (profileRaw) {
+        const profileData = JSON.parse(profileRaw) as Record<string, unknown>;
+        const profileName = typeof profileData.name === 'string' ? profileData.name : null;
+        if (profileName && displayName === profileName) return currentId;
+      }
     }
   } catch {
-    // localStorage unavailable — silently skip.
+    // localStorage unavailable or malformed profileData — silently skip.
   }
 
   // Legacy backfill: try to match a seeded mock profile by display name.
