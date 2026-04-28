@@ -7,15 +7,15 @@ export default function BottomNav() {
   const pathname = usePathname();
 
   const navItems = [
-    { href: '/', label: 'Home', icon: '🏠' },
+    { href: '/', label: 'Today', icon: '🏠' },
     { href: '/discover', label: 'Discover', icon: '🔍' },
     { href: '/challenges', label: 'Challenges', icon: '⚡' },
     { href: '/profile', label: 'Profile', icon: '👤' },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-subtle bg-elevated">
-      <div className="mx-auto max-w-[430px]">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-canvas)]">
+      <div className="mx-auto max-w-[430px] [padding-bottom:env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-around">
           {navItems.map((item) => (
             <Link
