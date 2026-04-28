@@ -7,10 +7,24 @@ interface AuthPanelProps {
   onAuthSuccess?: () => void;
 }
 
-type Mode = 'login' | 'signup';
+type Mode = 'signup' | 'login';
+
+function friendlyError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
+    return "We couldn't log you in. Check your email and password, or create an account first.";
+  }
+  if (lower.includes('email not confirmed')) {
+    return 'Please confirm your email before logging in. Check your inbox for the confirmation link.';
+  }
+  if (lower.includes('user already registered') || lower.includes('already registered')) {
+    return 'An account with this email already exists. Try logging in instead.';
+  }
+  return message;
+}
 
 export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
-  const [mode, setMode] = useState<Mode>('login');
+  const [mode, setMode] = useState<Mode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,23 +46,21 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
       const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
       setBusy(false);
       if (signUpError) {
-        setError(signUpError.message);
+        setError(friendlyError(signUpError.message));
         return;
       }
       if (data.user && data.session) {
-        setMessage(`Welcome! You're signed in as ${data.user.email}.`);
         onAuthSuccess?.();
       } else {
-        setMessage('Check your email to confirm your account.');
+        setMessage('Account created. Check your email to confirm your account.');
       }
     } else {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       setBusy(false);
       if (signInError) {
-        setError(signInError.message);
+        setError(friendlyError(signInError.message));
         return;
       }
-      setMessage(`Welcome back, ${data.user.email}!`);
       onAuthSuccess?.();
     }
   };
@@ -60,8 +72,8 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
   return (
     <div className="rounded-2xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-6 shadow-sm">
       {/* Mode tabs */}
-      <div className="flex gap-1 rounded-xl bg-[var(--color-bg-soft)] p-1 mb-5">
-        {(['login', 'signup'] as const).map((m) => (
+      <div className="flex gap-1 rounded-xl bg-[var(--color-bg-soft)] p-1 mb-4">
+        {(['signup', 'login'] as const).map((m) => (
           <button
             key={m}
             onClick={() => switchMode(m)}
@@ -71,10 +83,17 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
                 : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
             }`}
           >
-            {m === 'login' ? 'Log in' : 'Sign up'}
+            {m === 'signup' ? 'Create account' : 'Log in'}
           </button>
         ))}
       </div>
+
+      {/* Helper text */}
+      <p className="mb-4 text-xs text-[var(--color-text-muted)]">
+        {mode === 'signup'
+          ? 'Create an account to save your projects and updates.'
+          : 'Use the email and password you used when creating your account.'}
+      </p>
 
       {/* Fields */}
       <div className="space-y-3">
@@ -112,7 +131,7 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
         disabled={busy}
         className="mt-4 w-full rounded-lg bg-[var(--color-brand-primary)] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-brand-primary-hover)] disabled:opacity-50"
       >
-        {busy ? 'One moment…' : mode === 'login' ? 'Log in' : 'Create account'}
+        {busy ? 'One moment…' : mode === 'signup' ? 'Create account' : 'Log in'}
       </button>
     </div>
   );

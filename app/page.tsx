@@ -125,9 +125,6 @@ export default function TodayPage() {
           </div>
 
           {/* Auth panel */}
-          <p className="mb-4 text-center text-xs text-[var(--color-text-muted)]">
-            Create an account or log in to save your projects and updates.
-          </p>
           <AuthPanel />
 
         </div>
@@ -152,7 +149,7 @@ export default function TodayPage() {
           <button
             onClick={handleLogout}
             disabled={signingOut}
-            className="mt-1 flex-none text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors disabled:opacity-50"
+            className="mt-1 flex-none text-xs text-[var(--color-text-secondary)] underline underline-offset-2 hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-50"
           >
             {signingOut ? 'Signing out…' : 'Log out'}
           </button>
