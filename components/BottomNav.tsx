@@ -3,8 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+const AUTH_UTILITY_PATHS = ['/reset-password', '/update-password'];
+
 export default function BottomNav() {
   const pathname = usePathname();
+
+  if (AUTH_UTILITY_PATHS.includes(pathname)) return null;
 
   const navItems = [
     { href: '/', label: 'Today', icon: '🏠' },

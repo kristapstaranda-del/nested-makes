@@ -11,7 +11,7 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: "Nested Makes",
-  description: "Your cozy making community — discover crafts, join challenges, and grow your creative practice.",
+  description: "Track craft projects, join challenges, and share what you finish.",
 };
 
 export default function RootLayout({
