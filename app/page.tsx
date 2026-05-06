@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { type AuthUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import AuthPanel from '@/components/auth/AuthPanel';
@@ -18,6 +19,7 @@ interface ActiveChallenge {
 type AuthState = 'loading' | 'logged-out' | 'logged-in';
 
 export default function TodayPage() {
+  const router = useRouter();
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
@@ -37,7 +39,11 @@ export default function TodayPage() {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        router.push('/update-password');
+        return;
+      }
       if (session?.user) {
         setUser(session.user);
         setAuthState('logged-in');
