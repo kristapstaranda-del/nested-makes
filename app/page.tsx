@@ -9,6 +9,7 @@ import AuthPanel from '@/components/auth/AuthPanel';
 import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
 import { getProfileData } from '@/lib/profile';
+import { getSupabaseProfile } from '@/lib/supabase/profiles';
 
 interface ActiveChallenge {
   challengeId: string;
@@ -55,6 +56,14 @@ export default function TodayPage() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load Supabase display_name — overrides localStorage name when set
+  useEffect(() => {
+    if (authState !== 'logged-in' || !user) return;
+    getSupabaseProfile(user.id).then((remote) => {
+      if (remote?.display_name) setProfileName(remote.display_name);
+    }).catch(() => {});
+  }, [authState, user]);
 
   // Load localStorage data once auth is confirmed
   useEffect(() => {
@@ -140,7 +149,7 @@ export default function TodayPage() {
 
   // ── Logged-in Today dashboard ────────────────────────────────────────────────
   const visibleChallenges = activeChallenges.slice(0, 2);
-  const greeting = profileName || user?.email?.split('@')[0] || 'maker';
+  const greeting = profileName || null;
 
   return (
     <main className="min-h-screen bg-[var(--color-bg-canvas)]">
@@ -150,7 +159,9 @@ export default function TodayPage() {
         <div className="mb-6 flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-[var(--color-text-primary)]">Today</h1>
-            <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">Good to see you, {greeting}.</p>
+            <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+              {greeting ? `Good to see you, ${greeting}.` : 'Welcome back.'}
+            </p>
           </div>
           <button
             onClick={handleLogout}

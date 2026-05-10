@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { getCommentsForMake, saveComment, type FinishedMakeComment } from '@/lib/finishedMakeComments';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
+import { getProfileData } from '@/lib/profile';
 import AuthorLink from '@/components/community/AuthorLink';
 import { getFinishedMakes } from '@/lib/finishedMakes';
 import { addNotification } from '@/lib/notifications';
@@ -29,9 +30,7 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
     if (!msg) return;
 
     const authorId = getOrCreateUserId();
-    const displayName =
-      (typeof window !== 'undefined' ? localStorage.getItem('displayName') : null) ||
-      'Anonymous';
+    const displayName = getProfileData().name || 'Maker';
 
     const newComment = saveComment({ makeId, authorId, displayName, message: msg });
     setComments((prev) => [...prev, newComment]);

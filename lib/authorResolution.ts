@@ -118,7 +118,7 @@ export function getPublicCheckIns(): PublicCheckIn[] {
       )
       .map((ci) => {
         const displayName =
-          typeof ci.displayName === 'string' ? ci.displayName : 'Anonymous';
+          (typeof ci.displayName === 'string' && ci.displayName) ? ci.displayName : 'Maker';
         return {
           id: String(ci.id ?? ''),
           challengeId: typeof ci.challengeId === 'string' ? ci.challengeId : undefined,

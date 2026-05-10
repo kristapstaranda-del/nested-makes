@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getRepliesForCheckIn, saveReply, type CheckInReply } from '@/lib/checkInReplies';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
+import { getProfileData } from '@/lib/profile';
 import AuthorLink from '@/components/community/AuthorLink';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import { addNotification } from '@/lib/notifications';
@@ -34,9 +35,7 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
     if (!msg) return;
 
     const authorId = getOrCreateUserId();
-    const displayName =
-      (typeof window !== 'undefined' ? localStorage.getItem('displayName') : null) ||
-      'Anonymous';
+    const displayName = getProfileData().name || 'Maker';
 
     const newReply = saveReply({ checkInId, authorId, displayName, message: msg });
     setReplies((prev) => [...prev, newReply]);

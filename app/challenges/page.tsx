@@ -24,6 +24,8 @@ import { getPublicCheckIns } from '@/lib/authorResolution';
 import { getCurrentHabitStreak } from '@/lib/habitStats';
 import { getProfileData } from '@/lib/profile';
 import { getAvatarById } from '@/lib/avatarLibrary';
+import { supabase } from '@/lib/supabase/client';
+import { getSupabaseProfile } from '@/lib/supabase/profiles';
 
 
 interface Project {
@@ -76,7 +78,7 @@ export default function ChallengesPage() {
   const [isLoading, setIsLoading] = useState(true);
   // Merged project lookup: static curated + user-created (populated in useEffect)
   const [allProjects, setAllProjects] = useState<DiscoverProject[]>(projects as DiscoverProject[]);
-  const [authorName, setAuthorName] = useState('Anonymous');
+  const [authorName, setAuthorName] = useState('Maker');
   const [authorAvatarId, setAuthorAvatarId] = useState<string | undefined>(undefined);
 
   const [checkInsByChallenge, setCheckInsByChallenge] = useState<Record<string, CheckIn[]>>({});
@@ -173,11 +175,28 @@ export default function ChallengesPage() {
   };
 
 
+  // Load author identity: localStorage first, then Supabase override for logged-in users
   useEffect(() => {
     const profile = getProfileData();
-    setAuthorName(profile.name || 'Anonymous');
+    setAuthorName(profile.name || 'Maker');
     setAuthorAvatarId(profile.avatarId);
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (cancelled || !data.user) return;
+      try {
+        const remote = await getSupabaseProfile(data.user.id);
+        if (cancelled || !remote) return;
+        if (remote.display_name) setAuthorName(remote.display_name);
+        if (remote.avatar_id) setAuthorAvatarId(remote.avatar_id);
+      } catch {}
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     // === migration logic for active challenge storage ===
     const migrateAndReadActive = () => {
       // try new format first
@@ -923,11 +942,8 @@ export default function ChallengesPage() {
         {/* Author identity — sourced from Profile */}
         {(() => {
           const avatar = getAvatarById(authorAvatarId);
-          const initials =
-            authorName !== 'Anonymous'
-              ? authorName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('')
-              : null;
-          return authorName !== 'Anonymous' ? (
+          const initials = authorName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('') || null;
+          return (
             <div className="mt-4 flex items-center gap-2">
               {avatar ? (
                 <img src={avatar.imageSrc} alt={avatar.id} className="h-6 w-6 rounded-full object-cover flex-none" />
@@ -940,7 +956,7 @@ export default function ChallengesPage() {
                 Posting as <span className="font-medium text-[var(--color-text-secondary)]">{authorName}</span>
               </p>
             </div>
-          ) : null;
+          );
         })()}
 
         {activeContent}

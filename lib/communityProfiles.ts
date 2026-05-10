@@ -172,7 +172,7 @@ function getCurrentUserPublicProfile(userId: string): PublicProfile {
 
   return {
     id: userId,
-    displayName: profile.name || 'Anonymous',
+    displayName: profile.name || 'Maker',
     about: profile.about || '',
     craftInterests: Array.isArray(profile.craftInterests) ? profile.craftInterests : [],
     avatarId: profile.avatarId,

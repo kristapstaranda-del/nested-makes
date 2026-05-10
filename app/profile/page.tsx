@@ -20,6 +20,8 @@ import EditProfileModal from '@/components/profile/EditProfileModal';
 import NotificationFeed from '@/components/notifications/NotificationFeed';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabase/client';
+import { ensureSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { projects as staticProjects } from '@/app/data/projects';
@@ -42,12 +44,27 @@ interface ActiveChallenge {
   createdAt: string;
 }
 
+function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): ProfileData {
+  return {
+    ...local,
+    name: remote.display_name || local.name,
+    about: remote.about || local.about,
+    craftInterests: remote.craft_interests?.length ? remote.craft_interests : local.craftInterests,
+    avatarId: remote.avatar_id || local.avatarId,
+  };
+}
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const { currentFeedback, showFeedback, dismissFeedback } = useMicroFeedback();
+
+  const [userId, setUserId] = useState<string | null>(null);
+  const [supabaseLoading, setSupabaseLoading] = useState(false);
+  const [supabaseError, setSupabaseError] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
   const [archivedChallenges, setArchivedChallenges] = useState<ActiveChallenge[]>([]);
@@ -119,10 +136,43 @@ export default function ProfilePage() {
     setIsLoading(false);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setSupabaseLoading(true);
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (cancelled) return;
+      if (!data.user) {
+        setSupabaseLoading(false);
+        return;
+      }
+      setUserId(data.user.id);
+      try {
+        const remote = await ensureSupabaseProfile(data.user.id);
+        if (cancelled || !remote) return;
+        setProfile((prev) => (prev ? mergeSupabaseIntoLocal(prev, remote) : prev));
+      } catch {
+        if (!cancelled) setSupabaseError('Could not load your saved profile.');
+      } finally {
+        if (!cancelled) setSupabaseLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSaveProfile = (data: ProfileData) => {
     saveProfileData(data);
-    setProfile(data); // Update state to refresh UI
+    setProfile(data);
     showFeedback('profile_updated');
+
+    if (userId) {
+      setSaveError('');
+      upsertSupabaseProfile(userId, {
+        display_name: data.name || null,
+        about: data.about || null,
+        craft_interests: data.craftInterests.length ? data.craftInterests : null,
+        avatar_id: data.avatarId || null,
+      }).catch(() => setSaveError('Profile saved locally but could not sync to your account.'));
+    }
   };
 
   if (isLoading) {
@@ -171,6 +221,24 @@ export default function ProfilePage() {
           <div className="mb-4">
             <InlineFeedback feedback={currentFeedback} onDismiss={dismissFeedback} />
           </div>
+        )}
+
+        {supabaseLoading && (
+          <p className="mb-3 text-xs text-[var(--color-text-muted)]">Syncing profile…</p>
+        )}
+        {!supabaseLoading && userId === null && (
+          <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+            <Link href="/" className="underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors">
+              Create an account or log in
+            </Link>{' '}
+            to save your profile across devices.
+          </p>
+        )}
+        {supabaseError && (
+          <p className="mb-3 text-xs text-[var(--color-danger)]">{supabaseError}</p>
+        )}
+        {saveError && (
+          <p className="mb-3 text-xs text-[var(--color-danger)]">{saveError}</p>
         )}
 
         {(!profile.name || profile.name === 'Anonymous') && profile.craftInterests.length === 0 && (
