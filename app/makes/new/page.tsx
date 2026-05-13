@@ -13,6 +13,8 @@ import { getProfileData } from '@/lib/profile';
 import Button from '@/components/ui/Button';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
+import AuthRequiredPrompt from '@/components/auth/AuthRequiredPrompt';
 
 const MAX_MAKE_IMAGES = 3;
 const MAX_CAPTION_CHARS = 300;
@@ -34,6 +36,7 @@ function NewMakeForm() {
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const { currentFeedback, showFeedback, dismissFeedback, captureAchievementSnapshot } = useMicroFeedback();
+  const { status: authStatus } = useAuthStatus();
 
   // Resolve project title
   useEffect(() => {
@@ -121,6 +124,29 @@ function NewMakeForm() {
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  if (authStatus === 'loading') {
+    return <div className="min-h-screen bg-[var(--color-bg-canvas)]" />;
+  }
+
+  if (authStatus === 'anonymous') {
+    return (
+      <div className="min-h-screen bg-[var(--color-bg-canvas)]">
+        <div className="mx-auto max-w-[430px] px-4 pt-10 pb-24">
+          <Link
+            href="/challenges"
+            className="mb-6 inline-flex items-center gap-1.5 text-sm text-[var(--color-brand-primary)] hover:text-[var(--color-brand-primary-hover)]"
+          >
+            ← Back to Challenges
+          </Link>
+          <AuthRequiredPrompt
+            title="Log in to share a finished make."
+            description="Your finished make will be saved with your maker profile."
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-canvas">

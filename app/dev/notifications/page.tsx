@@ -9,6 +9,7 @@ import {
   type NotificationType,
 } from '@/lib/notifications';
 import { getOrCreateUserId, MOCK_PROFILES } from '@/lib/communityProfiles';
+import { getProfileData } from '@/lib/profile';
 import { getPublicCheckIns, type PublicCheckIn } from '@/lib/authorResolution';
 import { getFinishedMakes, type FinishedMake } from '@/lib/finishedMakes';
 import { toggleReaction } from '@/lib/checkInReactions';
@@ -119,7 +120,7 @@ export default function NotificationsDevPage() {
 
   function refresh() {
     const uid = getOrCreateUserId();
-    const name = localStorage.getItem('displayName') || 'Anonymous';
+    const name = getProfileData().name || 'Maker';
     setUserId(uid);
     setDisplayName(name);
 

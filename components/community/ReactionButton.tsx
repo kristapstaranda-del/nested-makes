@@ -5,6 +5,7 @@ import { getReactionState, toggleReaction } from '@/lib/checkInReactions';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import { addNotification } from '@/lib/notifications';
+import { getProfileData } from '@/lib/profile';
 
 interface ReactionButtonProps {
   checkInId: string;
@@ -31,9 +32,7 @@ export default function ReactionButton({ checkInId }: ReactionButtonProps) {
     if (next.liked) {
       const checkIn = getPublicCheckIns().find((ci) => ci.id === checkInId);
       if (checkIn?.authorId && checkIn.authorId !== userId) {
-        const actorName =
-          (typeof window !== 'undefined' ? localStorage.getItem('displayName') : null) ||
-          'Anonymous';
+        const actorName = getProfileData().name || 'Maker';
         addNotification({
           type: 'check_in_liked',
           recipientId: checkIn.authorId,

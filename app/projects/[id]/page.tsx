@@ -8,6 +8,7 @@ import { getUserProjects, deleteUserProject, getProjectCoverImage, type UserProj
 import { getFinishedMakesForProject, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { getCommentsForMake } from '@/lib/finishedMakeComments';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
+import { getProfileData } from '@/lib/profile';
 import StartChallengeButton from '@/components/StartChallengeButton';
 import Card from '@/components/ui/Card';
 import Chip from '@/components/ui/Chip';
@@ -71,7 +72,7 @@ export default function ProjectPage() {
   const [checkInMessage, setCheckInMessage] = useState('');
   const [checkInDoneToday, setCheckInDoneToday] = useState(false);
   const [checkInJustSaved, setCheckInJustSaved] = useState(false);
-  const [displayName, setDisplayName] = useState('Anonymous');
+  const [displayName, setDisplayName] = useState('Maker');
 
   // ── User project state ─────────────────────────────────────────────────────
   const [userProject, setUserProject] = useState<UserProject | null>(null);
@@ -108,8 +109,7 @@ export default function ProjectPage() {
   // Load displayName + today's check-in status when challenge is active
   useEffect(() => {
     if (!activeChallenge) return;
-    const savedName = localStorage.getItem('displayName');
-    if (savedName) setDisplayName(savedName);
+    setDisplayName(getProfileData().name || 'Maker');
     try {
       const today = new Date().toISOString().split('T')[0];
       const raw = localStorage.getItem('publicCheckIns');

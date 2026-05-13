@@ -5,6 +5,7 @@ import { getMakeLikeState, toggleMakeLike } from '@/lib/finishedMakeReactions';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakes } from '@/lib/finishedMakes';
 import { addNotification } from '@/lib/notifications';
+import { getProfileData } from '@/lib/profile';
 
 interface MakeLikeButtonProps {
   makeId: string;
@@ -31,9 +32,7 @@ export default function MakeLikeButton({ makeId }: MakeLikeButtonProps) {
     if (next.liked) {
       const make = getFinishedMakes().find((m) => m.id === makeId);
       if (make?.authorId && make.authorId !== userId) {
-        const actorName =
-          (typeof window !== 'undefined' ? localStorage.getItem('displayName') : null) ||
-          'Anonymous';
+        const actorName = getProfileData().name || 'Maker';
         addNotification({
           type: 'make_liked',
           recipientId: make.authorId,

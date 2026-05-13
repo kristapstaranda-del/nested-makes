@@ -26,6 +26,8 @@ import { getProfileData } from '@/lib/profile';
 import { getAvatarById } from '@/lib/avatarLibrary';
 import { supabase } from '@/lib/supabase/client';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
+import AuthRequiredPrompt from '@/components/auth/AuthRequiredPrompt';
 
 
 interface Project {
@@ -80,6 +82,7 @@ export default function ChallengesPage() {
   const [allProjects, setAllProjects] = useState<DiscoverProject[]>(projects as DiscoverProject[]);
   const [authorName, setAuthorName] = useState('Maker');
   const [authorAvatarId, setAuthorAvatarId] = useState<string | undefined>(undefined);
+  const { status: authStatus } = useAuthStatus();
 
   const [checkInsByChallenge, setCheckInsByChallenge] = useState<Record<string, CheckIn[]>>({});
   const [checkInMessages, setCheckInMessages] = useState<Record<string, string>>({});
@@ -621,76 +624,87 @@ export default function ChallengesPage() {
 
           {/* Check-in input */}
           <div className="mt-5">
-            <label className="block text-sm font-semibold text-[var(--color-text-primary)]">
-              How did it go today?
-            </label>
-            <textarea
-              value={checkInMessages[challenge.challengeId] || ''}
-              onChange={(e) => {
-                const text = e.target.value;
-                if (text.length <= 200) {
-                  setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: text }));
-                }
-              }}
-              disabled={completedToday}
-              placeholder="Share a quick update… (optional)"
-              className="mt-2 w-full rounded-lg border border-[var(--color-border-subtle)] bg-white p-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)] disabled:bg-[var(--color-bg-soft)] disabled:text-[var(--color-text-muted)]"
-              rows={3}
-            />
-            <div className="mt-1.5 flex items-center justify-between">
-              <span className="text-xs text-[var(--color-text-muted)]">
-                {(checkInMessages[challenge.challengeId] || '').length}/200
-              </span>
-              {!completedToday && (
-                <button
-                  type="button"
-                  onClick={() => checkInImageInputRefs.current[challenge.challengeId]?.click()}
-                  className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-brand-primary)] transition-colors"
-                >
-                  + photo
-                </button>
-              )}
-            </div>
-            <input
-              ref={(el) => { checkInImageInputRefs.current[challenge.challengeId] = el; }}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (file) handleCheckInImageSelect(challenge.challengeId, file);
-              }}
-            />
-            {checkInImages[challenge.challengeId] && (
-              <div className="mt-2 relative inline-block">
-                <img
-                  src={checkInImages[challenge.challengeId]}
-                  alt="Preview"
-                  className="h-16 w-16 rounded-lg object-cover border border-[var(--color-border-subtle)]"
+            {authStatus === 'loading' ? (
+              <div className="h-24 rounded-lg bg-[var(--color-bg-soft)] animate-pulse" />
+            ) : authStatus === 'anonymous' ? (
+              <AuthRequiredPrompt
+                title="Create an account to post an update."
+                description="Your update will be shown with your maker name and avatar."
+              />
+            ) : (
+              <>
+                <label className="block text-sm font-semibold text-[var(--color-text-primary)]">
+                  How did it go today?
+                </label>
+                <textarea
+                  value={checkInMessages[challenge.challengeId] || ''}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    if (text.length <= 200) {
+                      setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: text }));
+                    }
+                  }}
+                  disabled={completedToday}
+                  placeholder="Share a quick update… (optional)"
+                  className="mt-2 w-full rounded-lg border border-[var(--color-border-subtle)] bg-white p-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)] disabled:bg-[var(--color-bg-soft)] disabled:text-[var(--color-text-muted)]"
+                  rows={3}
                 />
-                <button
-                  type="button"
-                  onClick={() => setCheckInImages((imgs) => { const next = { ...imgs }; delete next[challenge.challengeId]; return next; })}
-                  className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-danger)] text-xs text-white leading-none"
-                >
-                  ×
-                </button>
-              </div>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    {(checkInMessages[challenge.challengeId] || '').length}/200
+                  </span>
+                  {!completedToday && (
+                    <button
+                      type="button"
+                      onClick={() => checkInImageInputRefs.current[challenge.challengeId]?.click()}
+                      className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-brand-primary)] transition-colors"
+                    >
+                      + photo
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={(el) => { checkInImageInputRefs.current[challenge.challengeId] = el; }}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) handleCheckInImageSelect(challenge.challengeId, file);
+                  }}
+                />
+                {checkInImages[challenge.challengeId] && (
+                  <div className="mt-2 relative inline-block">
+                    <img
+                      src={checkInImages[challenge.challengeId]}
+                      alt="Preview"
+                      className="h-16 w-16 rounded-lg object-cover border border-[var(--color-border-subtle)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCheckInImages((imgs) => { const next = { ...imgs }; delete next[challenge.challengeId]; return next; })}
+                      className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-danger)] text-xs text-white leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {checkInImageErrors[challenge.challengeId] && (
+                  <p className="mt-1 text-xs text-[var(--color-danger)]">{checkInImageErrors[challenge.challengeId]}</p>
+                )}
+                <div className="mt-3">
+                  <Button
+                    variant="primary"
+                    onClick={() => handleCheckInSubmit(challenge)}
+                    disabled={completedToday}
+                    className="w-full"
+                  >
+                    {completedToday ? 'Already completed today' : 'Complete Today'}
+                  </Button>
+                </div>
+              </>
             )}
-            {checkInImageErrors[challenge.challengeId] && (
-              <p className="mt-1 text-xs text-[var(--color-danger)]">{checkInImageErrors[challenge.challengeId]}</p>
-            )}
-            <div className="mt-3">
-              <Button
-                variant="primary"
-                onClick={() => handleCheckInSubmit(challenge)}
-                disabled={completedToday}
-                className="w-full"
-              >
-                {completedToday ? 'Already completed today' : 'Complete Today'}
-              </Button>
-            </div>
           </div>
 
           {/* Community check-ins */}
