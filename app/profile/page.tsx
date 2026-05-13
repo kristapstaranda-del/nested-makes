@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
 import { getProfileData, saveProfileData, ProfileData } from '@/lib/profile';
@@ -54,7 +55,7 @@ function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): Pr
   };
 }
 
-export default function ProfilePage() {
+function ProfilePageContent() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -65,6 +66,9 @@ export default function ProfilePage() {
   const [supabaseLoading, setSupabaseLoading] = useState(false);
   const [supabaseError, setSupabaseError] = useState('');
   const [saveError, setSaveError] = useState('');
+
+  const searchParams = useSearchParams();
+  const isSetupMode = searchParams.get('setup') === '1';
 
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
   const [archivedChallenges, setArchivedChallenges] = useState<ActiveChallenge[]>([]);
@@ -161,6 +165,18 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Auto-open the edit modal when landing from the confirmation email (?setup=1)
+  useEffect(() => {
+    if (isSetupMode && !isLoading && !supabaseLoading && userId) {
+      setIsEditModalOpen(true);
+    }
+  }, [isSetupMode, isLoading, supabaseLoading, userId]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUserId(null);
+  };
+
   const handleSaveProfile = (data: ProfileData) => {
     saveProfileData(data);
     setProfile(data);
@@ -236,6 +252,16 @@ export default function ProfilePage() {
             to save your profile across devices.
           </p>
         )}
+        {!supabaseLoading && userId !== null && (
+          <div className="mb-3 flex justify-end">
+            <button
+              onClick={handleSignOut}
+              className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors"
+            >
+              Log out
+            </button>
+          </div>
+        )}
         {supabaseError && (
           <p className="mb-3 text-xs text-[var(--color-danger)]">{supabaseError}</p>
         )}
@@ -243,7 +269,20 @@ export default function ProfilePage() {
           <p className="mb-3 text-xs text-[var(--color-danger)]">{saveError}</p>
         )}
 
-        {(!profile.name || profile.name === 'Anonymous') && profile.craftInterests.length === 0 && (
+        {isSetupMode && userId && (
+          <div className="mb-4 rounded-xl bg-[var(--color-brand-primary-soft)] border border-[var(--color-brand-primary)]/20 px-4 py-3">
+            <p className="text-sm font-semibold text-[var(--color-brand-primary)]">Set up your maker profile</p>
+            <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">Choose a maker name, avatar, and a short intro.</p>
+            <button
+              onClick={() => setIsEditModalOpen(true)}
+              className="mt-2 text-xs font-medium text-[var(--color-brand-primary)] underline underline-offset-2 hover:text-[var(--color-brand-primary-hover)] transition-colors"
+            >
+              Set up profile →
+            </button>
+          </div>
+        )}
+
+        {!isSetupMode && (!profile.name || profile.name === 'Maker') && profile.craftInterests.length === 0 && (
           <p className="mb-4 text-sm text-[var(--color-text-secondary)]">Welcome to Nested Makes! Set up your profile to get started.</p>
         )}
 
@@ -352,5 +391,13 @@ export default function ProfilePage() {
         onSave={handleSaveProfile}
       />
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense>
+      <ProfilePageContent />
+    </Suspense>
   );
 }

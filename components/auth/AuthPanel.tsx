@@ -44,7 +44,13 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
     setBusy(true);
 
     if (mode === 'signup') {
-      const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/profile?setup=1`,
+        },
+      });
       setBusy(false);
       if (signUpError) {
         setError(friendlyError(signUpError.message));
@@ -53,7 +59,9 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
       if (data.user && data.session) {
         onAuthSuccess?.();
       } else {
-        setMessage('Account created. Check your email to confirm your account.');
+        setMessage(
+          'Check your email to confirm your account. If you already have an account with this email, log in instead or reset your password.',
+        );
       }
     } else {
       const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
