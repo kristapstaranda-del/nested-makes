@@ -120,7 +120,7 @@ export default function NotificationsDevPage() {
 
   function refresh() {
     const uid = getOrCreateUserId();
-    const name = getProfileData().name || 'Maker';
+    const name = getProfileData().nickname || 'Maker';
     setUserId(uid);
     setDisplayName(name);
 

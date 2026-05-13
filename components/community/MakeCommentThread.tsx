@@ -30,7 +30,7 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
     if (!msg) return;
 
     const authorId = getOrCreateUserId();
-    const displayName = getProfileData().name || 'Maker';
+    const displayName = getProfileData().nickname || 'Maker';
 
     const newComment = saveComment({ makeId, authorId, displayName, message: msg });
     setComments((prev) => [...prev, newComment]);

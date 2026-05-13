@@ -109,7 +109,7 @@ export default function ProjectPage() {
   // Load displayName + today's check-in status when challenge is active
   useEffect(() => {
     if (!activeChallenge) return;
-    setDisplayName(getProfileData().name || 'Maker');
+    setDisplayName(getProfileData().nickname || 'Maker');
     try {
       const today = new Date().toISOString().split('T')[0];
       const raw = localStorage.getItem('publicCheckIns');

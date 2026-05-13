@@ -32,7 +32,7 @@ export default function MakeLikeButton({ makeId }: MakeLikeButtonProps) {
     if (next.liked) {
       const make = getFinishedMakes().find((m) => m.id === makeId);
       if (make?.authorId && make.authorId !== userId) {
-        const actorName = getProfileData().name || 'Maker';
+        const actorName = getProfileData().nickname || 'Maker';
         addNotification({
           type: 'make_liked',
           recipientId: make.authorId,

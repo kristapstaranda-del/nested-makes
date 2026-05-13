@@ -61,7 +61,7 @@ export default function TodayPage() {
   useEffect(() => {
     if (authState !== 'logged-in' || !user) return;
     getSupabaseProfile(user.id).then((remote) => {
-      if (remote?.display_name) setProfileName(remote.display_name);
+      if (remote?.nickname) setProfileName(remote.nickname);
     }).catch(() => {});
   }, [authState, user]);
 
@@ -88,7 +88,7 @@ export default function TodayPage() {
     } catch {}
 
     const profile = getProfileData();
-    setProfileName(profile.name || '');
+    setProfileName(profile.nickname || '');
 
     const userProjs = getUserProjects().map(normalizeUserProject);
     setAllProjects([...(staticProjects as DiscoverProject[]), ...userProjs]);

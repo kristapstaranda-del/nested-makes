@@ -3,7 +3,7 @@ import Button from '@/components/ui/Button';
 import { getAvatarById } from '@/lib/avatarLibrary';
 
 interface ProfileHeaderProps {
-  name: string;
+  nickname: string;
   about: string;
   avatarId?: string;
   statusText?: string;
@@ -12,20 +12,20 @@ interface ProfileHeaderProps {
 }
 
 export default function ProfileHeader({
-  name,
+  nickname,
   about,
   avatarId,
   statusText,
   craftInterests,
   onEdit,
 }: ProfileHeaderProps) {
-  const initials = name
+  const initials = nickname
     .split(' ')
     .map((word) => word.charAt(0).toUpperCase())
     .join('')
-    .slice(0, 2) || 'A';
+    .slice(0, 2) || 'M';
 
-  const isProfileIncomplete = !name || name === 'Anonymous' || !about;
+  const isProfileIncomplete = !nickname || !about;
   const selectedAvatar = getAvatarById(avatarId);
 
   return (
@@ -35,7 +35,7 @@ export default function ProfileHeader({
         {selectedAvatar ? (
           <img
             src={selectedAvatar.imageSrc}
-            alt={name}
+            alt={nickname}
             className="h-16 w-16 flex-shrink-0 rounded-full object-cover"
           />
         ) : (
@@ -46,7 +46,7 @@ export default function ProfileHeader({
 
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
-            {name || 'Welcome crafter!'}
+            {nickname || 'Welcome crafter!'}
           </h2>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1">
             {about || (isProfileIncomplete ? 'Tell us about yourself and your crafts' : 'No bio yet')}

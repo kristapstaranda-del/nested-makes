@@ -35,7 +35,7 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
     if (!msg) return;
 
     const authorId = getOrCreateUserId();
-    const displayName = getProfileData().name || 'Maker';
+    const displayName = getProfileData().nickname || 'Maker';
 
     const newReply = saveReply({ checkInId, authorId, displayName, message: msg });
     setReplies((prev) => [...prev, newReply]);

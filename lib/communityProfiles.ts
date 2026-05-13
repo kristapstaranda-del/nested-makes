@@ -163,7 +163,7 @@ function getCurrentUserPublicProfile(userId: string): PublicProfile {
           id: String(ci.id ?? ''),
           message: ci.message,
           date: ci.date,
-          displayName: ci.displayName ?? profile.name,
+          displayName: ci.displayName ?? profile.nickname,
           authorId: ci.authorId,
           imageUrl: sanitizeCoverImage(ci.imageUrl),
         }));
@@ -172,7 +172,7 @@ function getCurrentUserPublicProfile(userId: string): PublicProfile {
 
   return {
     id: userId,
-    displayName: profile.name || 'Maker',
+    displayName: profile.nickname || 'Maker',
     about: profile.about || '',
     craftInterests: Array.isArray(profile.craftInterests) ? profile.craftInterests : [],
     avatarId: profile.avatarId,

@@ -59,7 +59,11 @@ export function resolveAuthorId(
       const profileRaw = localStorage.getItem('profileData');
       if (profileRaw) {
         const profileData = JSON.parse(profileRaw) as Record<string, unknown>;
-        const profileName = typeof profileData.name === 'string' ? profileData.name : null;
+        // Check both new 'nickname' key and legacy 'name' key
+        const profileName =
+          typeof profileData.nickname === 'string' ? profileData.nickname :
+          typeof profileData.name === 'string' ? profileData.name :
+          null;
         if (profileName && displayName === profileName) return currentId;
       }
     }

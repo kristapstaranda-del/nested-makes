@@ -30,14 +30,14 @@ export default function EditProfileModal({
   profileData,
   onSave,
 }: EditProfileModalProps) {
-  const [name, setName] = useState(profileData.name);
+  const [nickname, setNickname] = useState(profileData.nickname);
   const [about, setAbout] = useState(profileData.about);
   const [craftInterests, setCraftInterests] = useState<string[]>(profileData.craftInterests);
   const [avatarId, setAvatarId] = useState(profileData.avatarId || '');
 
   useEffect(() => {
     if (isOpen) {
-      setName(profileData.name);
+      setNickname(profileData.nickname);
       setAbout(profileData.about);
       setCraftInterests([...profileData.craftInterests]);
       setAvatarId(profileData.avatarId || '');
@@ -46,7 +46,7 @@ export default function EditProfileModal({
 
   const handleSave = () => {
     onSave({
-      name,
+      nickname,
       about,
       craftInterests,
       avatarId: avatarId || undefined,
@@ -62,15 +62,14 @@ export default function EditProfileModal({
     );
   };
 
-  // Get initials for avatar preview
   const initials =
-    name
+    nickname
       ?.trim()
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((word) => word.charAt(0).toUpperCase())
-      .join('') || 'A';
+      .join('') || 'M';
 
   const selectedAvatar = avatarId
     ? AVATAR_LIBRARY.find(avatar => avatar.id === avatarId)
@@ -85,7 +84,7 @@ export default function EditProfileModal({
         <div className="flex-shrink-0 p-5 pb-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-              {profileData.name ? 'Edit Profile' : 'Create Profile'}
+              {profileData.nickname ? 'Edit Profile' : 'Create Profile'}
             </h2>
             <button
               onClick={onClose}
@@ -113,7 +112,7 @@ export default function EditProfileModal({
               </div>
             )}
             <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-              {name || '(your maker name)'}
+              {nickname || '(your nickname)'}
             </span>
           </div>
         </div>
@@ -148,17 +147,17 @@ export default function EditProfileModal({
               </div>
             </div>
 
-            {/* Maker name */}
+            {/* Nickname */}
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Maker name
+                Nickname
               </label>
               <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">Shown on your profile and updates.</p>
               <input
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Choose a maker name"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                placeholder="Choose a nickname"
                 className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-brand-primary)] focus:outline-none"
               />
             </div>

@@ -47,7 +47,7 @@ interface ActiveChallenge {
 function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): ProfileData {
   return {
     ...local,
-    name: remote.display_name || local.name,
+    nickname: remote.nickname || local.nickname,
     about: remote.about || local.about,
     craftInterests: remote.craft_interests?.length ? remote.craft_interests : local.craftInterests,
     avatarId: remote.avatar_id || local.avatarId,
@@ -174,7 +174,7 @@ export default function ProfilePage() {
     if (userId) {
       setSaveError('');
       upsertSupabaseProfile(userId, {
-        display_name: data.name || null,
+        display_name: data.nickname || null,
         about: data.about || null,
         craft_interests: data.craftInterests.length ? data.craftInterests : null,
         avatar_id: data.avatarId || null,
@@ -258,13 +258,13 @@ export default function ProfilePage() {
           <p className="mb-3 text-xs text-[var(--color-danger)]">{saveError}</p>
         )}
 
-        {(!profile.name || profile.name === 'Maker') && profile.craftInterests.length === 0 && (
+        {(!profile.nickname || profile.nickname === 'Maker') && profile.craftInterests.length === 0 && (
           <p className="mb-4 text-sm text-[var(--color-text-secondary)]">Welcome to Nested Makes! Set up your profile to get started.</p>
         )}
 
         <div className="space-y-5">
           <ProfileHeader
-            name={profile.name}
+            nickname={profile.nickname}
             about={profile.about}
             avatarId={profile.avatarId}
             statusText={`${activeChallengesCount} active · ${archivedChallengesCount} completed · ${totalCheckInsCount} updates`}

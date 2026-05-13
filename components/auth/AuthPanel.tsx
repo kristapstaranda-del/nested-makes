@@ -3,12 +3,20 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
+import { AVATAR_LIBRARY } from '@/lib/avatarLibrary';
 
 interface AuthPanelProps {
   onAuthSuccess?: () => void;
 }
 
 type Mode = 'signup' | 'login';
+
+const CRAFT_OPTIONS = [
+  'Knitting', 'Crochet', 'Beading', 'Weaving', 'Embroidery',
+  'Sewing', 'Pottery', 'Painting', 'Woodworking', 'DIY Crafts',
+];
+
+const NICKNAME_REGEX = /^[a-zA-Z0-9_-]{3,24}$/;
 
 function friendlyError(message: string): string {
   const lower = message.toLowerCase();
@@ -26,8 +34,17 @@ function friendlyError(message: string): string {
 
 export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
   const [mode, setMode] = useState<Mode>('signup');
+
+  // Shared fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  // Signup-only fields
+  const [nickname, setNickname] = useState('');
+  const [about, setAbout] = useState('');
+  const [avatarId, setAvatarId] = useState('');
+  const [craftInterests, setCraftInterests] = useState<string[]>([]);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -38,17 +55,51 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
     setMessage('');
   };
 
+  const toggleInterest = (interest: string) => {
+    setCraftInterests((prev) =>
+      prev.includes(interest) ? prev.filter((i) => i !== interest) : [...prev, interest],
+    );
+  };
+
+  const validateNickname = (): string => {
+    if (!nickname.trim()) return 'A nickname is required.';
+    if (!NICKNAME_REGEX.test(nickname.trim())) {
+      return 'Use 3–24 characters. Letters, numbers, underscores or hyphens work best.';
+    }
+    return '';
+  };
+
   const handleSubmit = async () => {
     setError('');
     setMessage('');
+
+    if (mode === 'signup') {
+      const nicknameError = validateNickname();
+      if (nicknameError) {
+        setError(nicknameError);
+        return;
+      }
+    }
+
     setBusy(true);
 
     if (mode === 'signup') {
+      const signupRedirectTo = `${window.location.origin}/auth/callback`;
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[AuthPanel] signupRedirectTo:', signupRedirectTo);
+      }
+
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: signupRedirectTo,
+          data: {
+            nickname: nickname.trim(),
+            about: about.trim() || null,
+            avatar_id: avatarId || null,
+            craft_interests: craftInterests.length ? craftInterests : null,
+          },
         },
       });
       setBusy(false);
@@ -78,6 +129,10 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
     if (e.key === 'Enter' && !busy) handleSubmit();
   };
 
+  const previewInitials =
+    nickname.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'M';
+  const selectedAvatar = avatarId ? AVATAR_LIBRARY.find((a) => a.id === avatarId) ?? null : null;
+
   return (
     <div className="rounded-2xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] p-6 shadow-sm">
       {/* Mode tabs */}
@@ -104,7 +159,7 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
           : 'Use the email and password you used when creating your account.'}
       </p>
 
-      {/* Fields */}
+      {/* Email + password */}
       <div className="space-y-3">
         <input
           type="email"
@@ -135,6 +190,114 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
           >
             Forgot password?
           </Link>
+        </div>
+      )}
+
+      {/* Signup-only: nickname + profile fields */}
+      {mode === 'signup' && (
+        <div className="mt-5 space-y-5 border-t border-[var(--color-border-subtle)] pt-5">
+
+          {/* Identity preview */}
+          <div className="flex items-center gap-3 rounded-xl bg-[var(--color-bg-soft)] px-3 py-2.5">
+            {selectedAvatar ? (
+              <img
+                src={selectedAvatar.imageSrc}
+                alt={selectedAvatar.id}
+                className="h-9 w-9 rounded-full object-cover flex-none"
+              />
+            ) : (
+              <div className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold text-white flex-none bg-[var(--color-text-muted)]">
+                {previewInitials}
+              </div>
+            )}
+            <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+              {nickname.trim() || '(your nickname)'}
+            </span>
+          </div>
+
+          {/* Nickname */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+              Nickname <span className="text-[var(--color-danger)]">*</span>
+            </label>
+            <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
+              This is how other makers will see you. It can be your name, a craft-inspired nickname, or something anonymous.
+            </p>
+            <input
+              type="text"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder="e.g. yarn_witch or PotteryPete"
+              autoComplete="username"
+              className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-canvas)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/40"
+            />
+          </div>
+
+          {/* Avatar picker */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
+              Avatar <span className="ml-1 normal-case font-normal">— optional</span>
+            </p>
+            <div className="grid grid-cols-6 gap-1.5">
+              {AVATAR_LIBRARY.map((avatar) => (
+                <button
+                  key={avatar.id}
+                  type="button"
+                  onClick={() => setAvatarId(avatarId === avatar.id ? '' : avatar.id)}
+                  className={`flex items-center justify-center rounded-lg border-2 transition-all hover:scale-105 ${
+                    avatarId === avatar.id
+                      ? 'border-[var(--color-brand-primary)] ring-1 ring-[var(--color-brand-primary)]'
+                      : 'border-[var(--color-border-subtle)] hover:border-[var(--color-text-muted)]'
+                  }`}
+                  title={`Avatar ${avatar.id}`}
+                >
+                  <img
+                    src={avatar.imageSrc}
+                    alt={`Avatar ${avatar.id}`}
+                    className="h-10 w-10 rounded-md object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Craft interests */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
+              Crafts <span className="ml-1 normal-case font-normal">— optional</span>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {CRAFT_OPTIONS.map((interest) => (
+                <button
+                  key={interest}
+                  type="button"
+                  onClick={() => toggleInterest(interest)}
+                  className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
+                    craftInterests.includes(interest)
+                      ? 'bg-[var(--color-brand-primary)] text-white'
+                      : 'bg-[var(--color-bg-soft)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]'
+                  }`}
+                >
+                  {interest}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* About */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+              About <span className="ml-1 normal-case font-normal">— optional</span>
+            </label>
+            <textarea
+              value={about}
+              onChange={(e) => setAbout(e.target.value.slice(0, 160))}
+              placeholder="Tell us about your creative practice"
+              rows={2}
+              className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-canvas)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]/40"
+            />
+            <p className="mt-1 text-right text-xs text-[var(--color-text-muted)]">{about.length}/160</p>
+          </div>
         </div>
       )}
 

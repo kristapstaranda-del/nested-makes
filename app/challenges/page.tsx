@@ -181,7 +181,7 @@ export default function ChallengesPage() {
   // Load author identity: localStorage first, then Supabase override for logged-in users
   useEffect(() => {
     const profile = getProfileData();
-    setAuthorName(profile.name || 'Maker');
+    setAuthorName(profile.nickname || 'Maker');
     setAuthorAvatarId(profile.avatarId);
   }, []);
 
@@ -192,7 +192,7 @@ export default function ChallengesPage() {
       try {
         const remote = await getSupabaseProfile(data.user.id);
         if (cancelled || !remote) return;
-        if (remote.display_name) setAuthorName(remote.display_name);
+        if (remote.nickname) setAuthorName(remote.nickname);
         if (remote.avatar_id) setAuthorAvatarId(remote.avatar_id);
       } catch {}
     });

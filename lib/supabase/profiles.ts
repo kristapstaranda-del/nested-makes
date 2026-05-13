@@ -4,7 +4,7 @@ export interface SupabaseProfile {
   id: string;
   created_at: string | null;
   updated_at: string | null;
-  display_name: string | null;
+  nickname: string | null;      // aliased from display_name via PostgREST
   about: string | null;
   avatar_id: string | null;
   avatar_color: string | null;
@@ -13,7 +13,7 @@ export interface SupabaseProfile {
 }
 
 export interface SupabaseProfileUpdate {
-  display_name?: string | null;
+  display_name?: string | null;   // DB column name — maps to the nickname field
   about?: string | null;
   avatar_id?: string | null;
   avatar_color?: string | null;
@@ -21,8 +21,9 @@ export interface SupabaseProfileUpdate {
   craft_interests?: string[] | null;
 }
 
+// PostgREST alias: nickname:display_name returns { nickname: '...' } without a DB migration
 const PROFILE_COLUMNS =
-  'id, created_at, updated_at, display_name, about, avatar_id, avatar_color, avatar_emoji, craft_interests';
+  'id, created_at, updated_at, nickname:display_name, about, avatar_id, avatar_color, avatar_emoji, craft_interests';
 
 /**
  * Fetch the profile row for a given auth user ID.

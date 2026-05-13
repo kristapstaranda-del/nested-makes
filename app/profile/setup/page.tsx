@@ -21,7 +21,7 @@ export default function ProfileSetupPage() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [userId, setUserId] = useState<string | null>(null);
 
-  const [name, setName] = useState('');
+  const [nickname, setNickname] = useState('');
   const [about, setAbout] = useState('');
   const [craftInterests, setCraftInterests] = useState<string[]>([]);
   const [avatarId, setAvatarId] = useState('');
@@ -38,8 +38,8 @@ export default function ProfileSetupPage() {
 
       // Pre-populate from localStorage if anything was previously saved
       const existing = getProfileData();
-      if (existing.name && existing.name !== 'Anonymous' && existing.name !== 'Maker') {
-        setName(existing.name);
+      if (existing.nickname && existing.nickname !== 'Maker') {
+        setNickname(existing.nickname);
       }
       if (existing.about) setAbout(existing.about);
       if (existing.craftInterests.length) setCraftInterests(existing.craftInterests);
@@ -60,7 +60,7 @@ export default function ProfileSetupPage() {
     setSaveError('');
     try {
       const profileData = {
-        name: name.trim() || 'Maker',
+        nickname: nickname.trim() || 'Maker',
         about: about.trim(),
         craftInterests,
         avatarId: avatarId || undefined,
@@ -68,7 +68,7 @@ export default function ProfileSetupPage() {
       saveProfileData(profileData);
       if (userId) {
         await upsertSupabaseProfile(userId, {
-          display_name: profileData.name || null,
+          display_name: profileData.nickname || null,
           about: profileData.about || null,
           craft_interests: profileData.craftInterests.length ? profileData.craftInterests : null,
           avatar_id: profileData.avatarId || null,
@@ -110,7 +110,7 @@ export default function ProfileSetupPage() {
   // ── Setup form ───────────────────────────────────────────────────────────────
 
   const initials =
-    name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'M';
+    nickname.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'M';
   const selectedAvatar = avatarId ? AVATAR_LIBRARY.find((a) => a.id === avatarId) ?? null : null;
 
   return (
@@ -123,7 +123,7 @@ export default function ProfileSetupPage() {
             Set up your maker profile
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Choose a maker name and avatar. You can update these anytime from your profile.
+            Choose a nickname and avatar. You can update these anytime from your profile.
           </p>
         </div>
 
@@ -141,7 +141,7 @@ export default function ProfileSetupPage() {
             </div>
           )}
           <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-            {name.trim() || '(your maker name)'}
+            {nickname.trim() || '(your nickname)'}
           </span>
         </div>
 
@@ -173,19 +173,19 @@ export default function ProfileSetupPage() {
           </div>
         </div>
 
-        {/* Maker name */}
+        {/* Nickname */}
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
-            Maker name
+            Nickname
           </label>
           <p className="mb-1.5 text-xs text-[var(--color-text-muted)]">
             Shown on your profile and updates.
           </p>
           <input
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Choose a maker name"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder="Choose a nickname"
             className="w-full rounded-lg border border-[var(--color-border-subtle)] bg-white px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)]"
           />
         </div>

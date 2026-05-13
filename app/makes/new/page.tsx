@@ -106,7 +106,7 @@ function NewMakeForm() {
         projectId,
         challengeId,
         authorId: getOrCreateUserId(),
-        displayName: profile.name || 'Maker',
+        displayName: profile.nickname || 'Maker',
         caption: caption.trim() || undefined,
         images,
       });

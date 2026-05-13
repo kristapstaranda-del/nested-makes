@@ -14,13 +14,13 @@ interface AvatarPreviewProps {
  */
 export default function AvatarPreview({ profile }: AvatarPreviewProps) {
   const initials =
-    profile.name
+    profile.nickname
       ?.trim()
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((word) => word.charAt(0).toUpperCase())
-      .join('') || 'A';
+      .join('') || 'M';
 
   const avatar = getAvatarById(profile.avatarId);
 
@@ -51,7 +51,7 @@ export default function AvatarPreview({ profile }: AvatarPreviewProps) {
         {/* Name */}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-            {profile.name || 'Your name'}
+            {profile.nickname || 'Your nickname'}
           </p>
         </div>
       </div>

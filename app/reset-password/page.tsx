@@ -15,6 +15,7 @@ export default function ResetPasswordPage() {
     setError('');
     setStatus('busy');
 
+    // Password reset intentionally uses /update-password and must not be changed.
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/update-password`,
     });

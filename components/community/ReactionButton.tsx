@@ -32,7 +32,7 @@ export default function ReactionButton({ checkInId }: ReactionButtonProps) {
     if (next.liked) {
       const checkIn = getPublicCheckIns().find((ci) => ci.id === checkInId);
       if (checkIn?.authorId && checkIn.authorId !== userId) {
-        const actorName = getProfileData().name || 'Maker';
+        const actorName = getProfileData().nickname || 'Maker';
         addNotification({
           type: 'check_in_liked',
           recipientId: checkIn.authorId,
