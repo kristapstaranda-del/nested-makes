@@ -244,7 +244,7 @@ function ProfilePageContent() {
         {supabaseLoading && (
           <p className="mb-3 text-xs text-[var(--color-text-muted)]">Syncing profile…</p>
         )}
-        {!supabaseLoading && userId === null && (
+        {!isSetupMode && !supabaseLoading && userId === null && (
           <p className="mb-3 text-xs text-[var(--color-text-muted)]">
             <Link href="/" className="underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors">
               Create an account or log in
