@@ -21,7 +21,7 @@ import NotificationFeed from '@/components/notifications/NotificationFeed';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
-import { ensureSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
+import { getSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { projects as staticProjects } from '@/app/data/projects';
@@ -147,9 +147,11 @@ export default function ProfilePage() {
       }
       setUserId(data.user.id);
       try {
-        const remote = await ensureSupabaseProfile(data.user.id);
-        if (cancelled || !remote) return;
-        setProfile((prev) => (prev ? mergeSupabaseIntoLocal(prev, remote) : prev));
+        const remote = await getSupabaseProfile(data.user.id);
+        if (cancelled) return;
+        if (remote) {
+          setProfile((prev) => (prev ? mergeSupabaseIntoLocal(prev, remote) : prev));
+        }
       } catch {
         if (!cancelled) setSupabaseError('Could not load your saved profile.');
       } finally {
