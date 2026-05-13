@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
 import { getProfileData, saveProfileData, ProfileData } from '@/lib/profile';
@@ -55,7 +54,7 @@ function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): Pr
   };
 }
 
-function ProfilePageContent() {
+export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -66,9 +65,6 @@ function ProfilePageContent() {
   const [supabaseLoading, setSupabaseLoading] = useState(false);
   const [supabaseError, setSupabaseError] = useState('');
   const [saveError, setSaveError] = useState('');
-
-  const searchParams = useSearchParams();
-  const isSetupMode = searchParams.get('setup') === '1';
 
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
   const [archivedChallenges, setArchivedChallenges] = useState<ActiveChallenge[]>([]);
@@ -165,13 +161,6 @@ function ProfilePageContent() {
     return () => { cancelled = true; };
   }, []);
 
-  // Auto-open the edit modal when landing from the confirmation email (?setup=1)
-  useEffect(() => {
-    if (isSetupMode && !isLoading && !supabaseLoading && userId) {
-      setIsEditModalOpen(true);
-    }
-  }, [isSetupMode, isLoading, supabaseLoading, userId]);
-
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setUserId(null);
@@ -244,7 +233,7 @@ function ProfilePageContent() {
         {supabaseLoading && (
           <p className="mb-3 text-xs text-[var(--color-text-muted)]">Syncing profile…</p>
         )}
-        {!isSetupMode && !supabaseLoading && userId === null && (
+        {!supabaseLoading && userId === null && (
           <p className="mb-3 text-xs text-[var(--color-text-muted)]">
             <Link href="/" className="underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors">
               Create an account or log in
@@ -269,20 +258,7 @@ function ProfilePageContent() {
           <p className="mb-3 text-xs text-[var(--color-danger)]">{saveError}</p>
         )}
 
-        {isSetupMode && userId && (
-          <div className="mb-4 rounded-xl bg-[var(--color-brand-primary-soft)] border border-[var(--color-brand-primary)]/20 px-4 py-3">
-            <p className="text-sm font-semibold text-[var(--color-brand-primary)]">Set up your maker profile</p>
-            <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">Choose a maker name, avatar, and a short intro.</p>
-            <button
-              onClick={() => setIsEditModalOpen(true)}
-              className="mt-2 text-xs font-medium text-[var(--color-brand-primary)] underline underline-offset-2 hover:text-[var(--color-brand-primary-hover)] transition-colors"
-            >
-              Set up profile →
-            </button>
-          </div>
-        )}
-
-        {!isSetupMode && (!profile.name || profile.name === 'Maker') && profile.craftInterests.length === 0 && (
+        {(!profile.name || profile.name === 'Maker') && profile.craftInterests.length === 0 && (
           <p className="mb-4 text-sm text-[var(--color-text-secondary)]">Welcome to Nested Makes! Set up your profile to get started.</p>
         )}
 
@@ -391,13 +367,5 @@ function ProfilePageContent() {
         onSave={handleSaveProfile}
       />
     </div>
-  );
-}
-
-export default function ProfilePage() {
-  return (
-    <Suspense>
-      <ProfilePageContent />
-    </Suspense>
   );
 }
