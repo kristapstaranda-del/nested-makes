@@ -48,7 +48,7 @@ export default function AuthPanel({ onAuthSuccess }: AuthPanelProps) {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent('/profile?setup=1')}`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
       setBusy(false);

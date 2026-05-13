@@ -9,7 +9,7 @@ function AuthCallbackHandler() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const rawNext = searchParams.get('next') ?? '/';
+    const rawNext = searchParams.get('next') ?? '/profile?setup=1';
     // Guard against open-redirect: only allow internal relative paths
     const next = rawNext.startsWith('/') ? rawNext : '/';
 
