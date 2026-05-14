@@ -17,11 +17,20 @@ async function getAuthUser(): Promise<{ id: string }> {
 
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
-function storagePath(userId: string, projectId: string, imageId: string): string {
-  // Path format: {userId}/{projectId}/{imageId}.webp
-  // First segment MUST equal auth.uid() to pass RLS:
-  //   (storage.foldername(name))[1] = auth.uid()::text
-  return `${userId}/${projectId}/${imageId}.webp`;
+export function getImageExtensionFromMimeType(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/webp':
+      return 'webp';
+    case 'image/gif':
+      return 'gif';
+    default:
+      return 'webp';
+  }
 }
 
 function getPublicUrl(path: string): string {
@@ -29,45 +38,71 @@ function getPublicUrl(path: string): string {
   return data.publicUrl;
 }
 
-async function uploadImage(
-  path: string,
-  dataUrl: string,
+/**
+ * Converts a base64 data URL to a Blob, uploads it to Storage, and returns
+ * the final storage path (including MIME-derived extension).
+ *
+ * Path format: {authUserId}/{projectId}/{imageId}.{ext}
+ * The first segment MUST equal auth.uid() to satisfy RLS:
+ *   (storage.foldername(name))[1] = auth.uid()::text
+ */
+async function uploadImageAndGetPath(
   authUserId: string,
-): Promise<void> {
+  projectId: string,
+  imageId: string,
+  dataUrl: string,
+): Promise<string> {
+  // Convert data URL → Blob (preserves MIME type from the data URL header)
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+
+  const extension = getImageExtensionFromMimeType(blob.type);
+  const contentType = blob.type || 'image/webp';
+  const path = `${authUserId}/${projectId}/${imageId}.${extension}`;
   const firstFolder = path.split('/')[0];
 
   if (process.env.NODE_ENV === 'development') {
-    console.log('Uploading project image', {
+    console.log('[Storage] uploadImageAndGetPath', {
       bucket: BUCKET,
       path,
       firstFolder,
       userId: authUserId,
       firstFolderMatchesUser: firstFolder === authUserId,
+      blobType: blob.type,
+      blobSize: blob.size,
+      extension,
+      contentType,
+      isBlob: blob instanceof Blob,
+      isFormData: false,
     });
   }
 
   if (firstFolder !== authUserId) {
     throw new Error(
-      `Storage path mismatch: first folder "${firstFolder}" does not match auth user "${authUserId}". ` +
-        'Upload would be rejected by RLS.',
+      `[Storage] Path mismatch: first folder "${firstFolder}" ≠ auth user "${authUserId}". ` +
+        'Upload would fail RLS.',
     );
   }
 
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
-
-  if (process.env.NODE_ENV === 'development') {
-    console.log('Uploading project image blob', {
-      blobType: blob.type,
-      blobSize: blob.size,
-    });
-  }
-
+  // Pass the Blob directly — Supabase SDK handles the HTTP encoding internally.
   const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
     upsert: true,
-    contentType: blob.type || 'image/webp',
+    contentType,
   });
-  if (error) throw error;
+
+  if (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[Storage] Upload failed', { path, blobType: blob.type, error });
+    }
+    throw error;
+  }
+
+  return path;
+}
+
+async function deleteStorageImages(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await supabase.storage.from(BUCKET).remove(paths);
 }
 
 // ── DB row shape ─────────────────────────────────────────────────────────────
@@ -153,8 +188,7 @@ export async function createSupabaseUserProject(
   _callerUserId: string,
   data: CreateProjectData,
 ): Promise<UserProject> {
-  // Always use the active Supabase session — never trust the caller-supplied ID
-  // for anything that touches Storage paths or DB user_id.
+  // Always derive the user ID from the live Supabase session.
   const authUser = await getAuthUser();
 
   // Insert project row; let the DB generate the UUID so projectId is authoritative.
@@ -174,19 +208,26 @@ export async function createSupabaseUserProject(
     .single();
   if (insertError) throw insertError;
 
+  // projectId is now the UUID that exists in the DB.
   const projectId: string = inserted.id;
 
-  // Upload images using the DB-returned projectId and the verified auth user ID.
   if (data.images && data.images.length > 0) {
     for (let i = 0; i < data.images.length; i++) {
       const img = data.images[i];
       const imageId = crypto.randomUUID();
-      const path = storagePath(authUser.id, projectId, imageId);
-      await uploadImage(path, img.dataUrl, authUser.id);
+
+      // uploadImageAndGetPath converts dataUrl → Blob, derives extension, builds path, uploads.
+      const storagePath = await uploadImageAndGetPath(
+        authUser.id,
+        projectId,
+        imageId,
+        img.dataUrl,
+      );
+
       const { error: imgError } = await supabase.from('project_images').insert({
         id: imageId,
         project_id: projectId,
-        storage_path: path,
+        storage_path: storagePath,
         is_cover: img.isCover,
         sort_order: i,
       });
@@ -233,21 +274,21 @@ export async function updateSupabaseUserProject(
     incomingImages.filter((img) => img.storagePath).map((img) => img.storagePath as string),
   );
 
-  // Delete images that were removed
+  // Remove Storage objects + DB rows for images the user deleted.
   const toDelete = (existingRows ?? []).filter((r) => !keptPaths.has(r.storage_path));
+  await deleteStorageImages(toDelete.map((r) => r.storage_path));
   if (toDelete.length > 0) {
-    await supabase.storage.from(BUCKET).remove(toDelete.map((r) => r.storage_path));
     await supabase
       .from('project_images')
       .delete()
       .in('id', toDelete.map((r) => r.id));
   }
 
-  // Upsert incoming images
+  // Upsert incoming images.
   for (let i = 0; i < incomingImages.length; i++) {
     const img = incomingImages[i];
     if (img.storagePath) {
-      // Existing Storage image — update cover flag + sort order only
+      // Existing Storage image — update metadata only.
       const existingRow = (existingRows ?? []).find((r) => r.storage_path === img.storagePath);
       if (existingRow) {
         await supabase
@@ -256,14 +297,13 @@ export async function updateSupabaseUserProject(
           .eq('id', existingRow.id);
       }
     } else {
-      // New base64 image — upload and insert
+      // New base64 image — upload and insert.
       const imageId = crypto.randomUUID();
-      const path = storagePath(authUser.id, id, imageId);
-      await uploadImage(path, img.dataUrl, authUser.id);
+      const storagePath = await uploadImageAndGetPath(authUser.id, id, imageId, img.dataUrl);
       await supabase.from('project_images').insert({
         id: imageId,
         project_id: id,
-        storage_path: path,
+        storage_path: storagePath,
         is_cover: img.isCover,
         sort_order: i,
       });
@@ -281,9 +321,6 @@ export async function deleteSupabaseUserProject(id: string, userId: string): Pro
     .select('storage_path')
     .eq('project_id', id);
 
-  if (imageRows && imageRows.length > 0) {
-    await supabase.storage.from(BUCKET).remove(imageRows.map((r) => r.storage_path));
-  }
-
+  await deleteStorageImages((imageRows ?? []).map((r) => r.storage_path));
   await supabase.from('user_projects').delete().eq('id', id).eq('user_id', userId);
 }
