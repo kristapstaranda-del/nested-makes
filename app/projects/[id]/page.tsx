@@ -4,7 +4,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { projects } from '../../data/projects';
-import { getUserProjects, deleteUserProject, getProjectCoverImage, type UserProject } from '@/lib/userProjects';
+import { getUserProjects, deleteUserProject, cacheUserProjectLocally, removeUserProjectFromCache, getProjectCoverImage, type UserProject } from '@/lib/userProjects';
+import { getSupabaseUserProject, deleteSupabaseUserProject, isUuid } from '@/lib/supabase/userProjects';
+import { supabase } from '@/lib/supabase/client';
 import { getFinishedMakesForProject, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { getCommentsForMake } from '@/lib/finishedMakeComments';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
@@ -86,13 +88,37 @@ export default function ProjectPage() {
   const [makesLightboxSrc, setMakesLightboxSrc] = useState<string | null>(null);
   const [makeCommentCounts, setMakeCommentCounts] = useState<Record<string, number>>({});
 
-  // Load user project from localStorage if not a static project
+  // Load user project — localStorage first, then Supabase fallback for UUID projects
   useEffect(() => {
-    if (!staticProject) {
-      const found = getUserProjects().find((p) => p.id === id) ?? null;
-      setUserProject(found);
+    if (staticProject) return;
+
+    async function load() {
+      const localFound = getUserProjects().find((p) => p.id === id) ?? null;
+      if (localFound) {
+        setUserProject(localFound);
+        setLoading(false);
+        return;
+      }
+
+      if (isUuid(id)) {
+        try {
+          const { data } = await supabase.auth.getUser();
+          if (data.user) {
+            const remote = await getSupabaseUserProject(id, data.user.id);
+            if (remote) {
+              cacheUserProjectLocally(remote);
+              setUserProject(remote);
+            }
+          }
+        } catch {
+          // Not found or network error — fall through to not-found state
+        }
+      }
+
       setLoading(false);
     }
+
+    load();
   }, [id, staticProject]);
 
   // Load finished makes + comment counts for this project
@@ -413,7 +439,7 @@ export default function ProjectPage() {
   }
 
   // ── User-created project ───────────────────────────────────────────────────
-  function handleDelete() {
+  async function handleDelete() {
     try {
       const raw = localStorage.getItem('activeChallenges');
       if (raw) {
@@ -427,6 +453,22 @@ export default function ProjectPage() {
       // If we can't read challenges, allow deletion to proceed safely
     }
     if (!window.confirm(`Delete "${userProject?.title}"? This can't be undone.`)) return;
+
+    if (isUuid(id)) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (data.user) {
+          await deleteSupabaseUserProject(id, data.user.id);
+          removeUserProjectFromCache(id);
+          router.push('/discover');
+          return;
+        }
+      } catch {
+        alert('Could not delete the project. Please try again.');
+        return;
+      }
+    }
+
     deleteUserProject(id);
     router.push('/discover');
   }

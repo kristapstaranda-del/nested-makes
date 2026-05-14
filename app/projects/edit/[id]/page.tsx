@@ -3,8 +3,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getUserProjects, updateUserProject, type UserProject, type ProjectImage } from '@/lib/userProjects';
+import { getUserProjects, updateUserProject, cacheUserProjectLocally, type UserProject, type ProjectImage } from '@/lib/userProjects';
 import { validateImageFile, fileToDataUrl, MAX_PROJECT_IMAGES } from '@/lib/imageUtils';
+import { getSupabaseUserProject, updateSupabaseUserProject, isUuid } from '@/lib/supabase/userProjects';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
 import SectionHeader from '@/components/ui/SectionHeader';
 import Button from '@/components/ui/Button';
 
@@ -54,8 +56,11 @@ export default function EditProjectPage() {
   const router = useRouter();
   const id = typeof params.id === 'string' ? params.id : '';
 
+  const { status: authStatus, user } = useAuthStatus();
   const [project, setProject] = useState<UserProject | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [values, setValues] = useState<FormValues>({
     title: '',
     description: '',
@@ -70,28 +75,54 @@ export default function EditProjectPage() {
   const [imageError, setImageError] = useState<string>('');
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const found = getUserProjects().find((p) => p.id === id && p.sourceType === 'user');
-    if (found) {
-      setProject(found);
-      setValues({
-        title: found.title,
-        description: found.description,
-        category: found.category,
-        patternLink: found.patternLink ?? '',
-        notes: found.notes ?? '',
-      });
-      // Migrate legacy v2 coverImage into the images array if no v3 images exist
-      if (found.images && found.images.length > 0) {
-        setImages(found.images);
-      } else if (found.coverImage) {
-        setImages([{ id: 'legacy_0', dataUrl: found.coverImage, isCover: true }]);
-      } else {
-        setImages([]);
-      }
+  function populateForm(found: UserProject) {
+    setProject(found);
+    setValues({
+      title: found.title,
+      description: found.description,
+      category: found.category,
+      patternLink: found.patternLink ?? '',
+      notes: found.notes ?? '',
+    });
+    if (found.images && found.images.length > 0) {
+      setImages(found.images);
+    } else if (found.coverImage) {
+      setImages([{ id: 'legacy_0', dataUrl: found.coverImage, isCover: true }]);
+    } else {
+      setImages([]);
     }
-    setLoading(false);
-  }, [id]);
+  }
+
+  useEffect(() => {
+    if (authStatus === 'loading') return;
+
+    async function load() {
+      // Try localStorage first (fast path — works offline and for localStorage-only projects)
+      const localFound = getUserProjects().find((p) => p.id === id && p.sourceType === 'user');
+      if (localFound) {
+        populateForm(localFound);
+        setLoading(false);
+        return;
+      }
+
+      // If authenticated and ID is a UUID, fetch from Supabase
+      if (authStatus === 'authenticated' && user && isUuid(id)) {
+        try {
+          const remote = await getSupabaseUserProject(id, user.id);
+          if (remote) {
+            cacheUserProjectLocally(remote);
+            populateForm(remote);
+          }
+        } catch {
+          // Project not found or network error — fall through to show not-found state
+        }
+      }
+
+      setLoading(false);
+    }
+
+    load();
+  }, [id, authStatus, user]);
 
   const errors = validate(values);
   const hasErrors = Object.keys(errors).length > 0;
@@ -133,23 +164,35 @@ export default function EditProjectPage() {
     setImages((prev) => prev.map((img) => ({ ...img, isCover: img.id === imgId })));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setHasSubmitted(true);
     setImageError('');
+    setSubmitError('');
     if (hasErrors) return;
 
-    updateUserProject(id, {
+    setIsSubmitting(true);
+    const projectData = {
       title: values.title.trim(),
       description: values.description.trim(),
       category: values.category,
       patternLink: values.patternLink.trim(),
       notes: values.notes.trim(),
       images: images.length > 0 ? images : undefined,
-      coverImage: undefined, // strip legacy field on re-save
-    });
+    };
 
-    router.push(`/projects/${id}`);
+    try {
+      if (authStatus === 'authenticated' && user && isUuid(id)) {
+        const saved = await updateSupabaseUserProject(id, user.id, projectData);
+        cacheUserProjectLocally(saved);
+      } else {
+        updateUserProject(id, { ...projectData, coverImage: undefined });
+      }
+      router.push(`/projects/${id}`);
+    } catch {
+      setSubmitError('Something went wrong. Please try again.');
+      setIsSubmitting(false);
+    }
   }
 
   const backHref = `/projects/${id}`;
@@ -381,8 +424,9 @@ export default function EditProjectPage() {
           </div>
 
           {/* Submit */}
-          <Button type="submit" variant="primary" className="w-full">
-            Save changes
+          {submitError && <p className={errorClass}>{submitError}</p>}
+          <Button type="submit" variant="primary" className="w-full" disabled={isSubmitting}>
+            {isSubmitting ? 'Saving…' : 'Save changes'}
           </Button>
 
         </form>

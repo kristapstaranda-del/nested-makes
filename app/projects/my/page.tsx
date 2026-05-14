@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getUserProjects, deleteUserProject, type UserProject } from '@/lib/userProjects';
+import { getUserProjects, deleteUserProject, cacheUserProjectLocally, removeUserProjectFromCache, type UserProject } from '@/lib/userProjects';
+import { getSupabaseUserProjects, deleteSupabaseUserProject, isUuid } from '@/lib/supabase/userProjects';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
 import ProjectCategoryIcon from '@/components/ui/ProjectCategoryIcon';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -18,19 +20,45 @@ const difficultyVariant = (difficulty: string) => {
   }
 };
 
+function sortByDate(projects: UserProject[]): UserProject[] {
+  return [...projects].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 export default function MyProjectsPage() {
+  const { status, user } = useAuthStatus();
   const [projects, setProjects] = useState<UserProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    const loaded = getUserProjects().sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    setProjects(loaded);
-    setLoading(false);
-  }, []);
+    if (status === 'loading') return;
 
-  function handleDelete(project: UserProject) {
+    async function loadProjects() {
+      const localProjects = getUserProjects();
+
+      if (status === 'authenticated' && user) {
+        try {
+          const remoteProjects = await getSupabaseUserProjects(user.id);
+          remoteProjects.forEach(cacheUserProjectLocally);
+          const remoteIds = new Set(remoteProjects.map((p) => p.id));
+          const localOnly = localProjects.filter((p) => !remoteIds.has(p.id));
+          setProjects(sortByDate([...remoteProjects, ...localOnly]));
+        } catch {
+          setProjects(sortByDate(localProjects));
+        }
+      } else {
+        setProjects(sortByDate(localProjects));
+      }
+
+      setLoading(false);
+    }
+
+    loadProjects();
+  }, [status, user]);
+
+  async function handleDelete(project: UserProject) {
     // Block deletion if currently in an active challenge
     try {
       const raw = localStorage.getItem('activeChallenges');
@@ -44,7 +72,22 @@ export default function MyProjectsPage() {
     } catch {}
 
     if (!window.confirm(`Delete "${project.title}"? This can't be undone.`)) return;
-    deleteUserProject(project.id);
+
+    if (status === 'authenticated' && user && isUuid(project.id)) {
+      setDeleting(project.id);
+      try {
+        await deleteSupabaseUserProject(project.id, user.id);
+        removeUserProjectFromCache(project.id);
+      } catch {
+        alert('Could not delete the project. Please try again.');
+        setDeleting(null);
+        return;
+      }
+      setDeleting(null);
+    } else {
+      deleteUserProject(project.id);
+    }
+
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
   }
 
@@ -135,9 +178,10 @@ export default function MyProjectsPage() {
                       </Link>
                       <button
                         onClick={() => handleDelete(project)}
-                        className="ml-auto text-sm font-medium text-[var(--color-danger)] hover:text-[var(--color-danger-hover,#a05560)]"
+                        disabled={deleting === project.id}
+                        className="ml-auto text-sm font-medium text-[var(--color-danger)] hover:text-[var(--color-danger-hover,#a05560)] disabled:opacity-50"
                       >
-                        Delete
+                        {deleting === project.id ? 'Deleting…' : 'Delete'}
                       </button>
                     </div>
                   </Card>

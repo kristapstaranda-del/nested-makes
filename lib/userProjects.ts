@@ -21,9 +21,10 @@ import { sanitizeCoverImage } from './imageUtils';
  * One image must have isCover: true.
  */
 export interface ProjectImage {
-  id: string;        // 'img_${Date.now()}_${random}'
-  dataUrl: string;   // base64 data URL
+  id: string;          // 'img_${Date.now()}_${random}' or UUID for Supabase-backed
+  dataUrl: string;     // base64 data URL OR https:// Supabase Storage public URL
   isCover: boolean;
+  storagePath?: string; // present when the image is backed by Supabase Storage
 }
 
 /**
@@ -198,6 +199,45 @@ export function updateUserProject(
  * No-op if the id does not exist.
  */
 export function deleteUserProject(id: string): void {
+  if (typeof window === 'undefined') return;
+
+  const existing = getUserProjects();
+  const updated = existing.filter((p) => p.id !== id);
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Write a Supabase-backed project into the localStorage cache so that
+ * sync readers (Discover, Today) see it without waiting for a DB call.
+ * Upserts by id.
+ */
+export function cacheUserProjectLocally(project: UserProject): void {
+  if (typeof window === 'undefined') return;
+
+  const existing = getUserProjects();
+  const idx = existing.findIndex((p) => p.id === project.id);
+  const updated =
+    idx === -1
+      ? [...existing, project]
+      : existing.map((p, i) => (i === idx ? project : p));
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Remove a project from the localStorage cache by id.
+ * Used after a successful Supabase delete to keep the cache consistent.
+ */
+export function removeUserProjectFromCache(id: string): void {
   if (typeof window === 'undefined') return;
 
   const existing = getUserProjects();

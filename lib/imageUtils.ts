@@ -13,11 +13,13 @@ export function validateImageFile(file: File): string | null {
 }
 
 /**
- * Returns the value if it looks like a valid base64 image data URL,
- * otherwise returns undefined. Protects against corrupted localStorage values.
+ * Returns the value if it looks like a valid image URL (base64 data URL or
+ * https:// Storage public URL), otherwise returns undefined. Protects against
+ * corrupted localStorage values.
  */
 export function sanitizeCoverImage(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
+  if (value.startsWith('https://')) return value;
   if (!value.startsWith('data:image/')) return undefined;
   if (value.length < 50) return undefined; // implausibly short — not a real image
   return value;

@@ -3,8 +3,10 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { saveUserProject, type ProjectImage } from '@/lib/userProjects';
+import { saveUserProject, cacheUserProjectLocally, type ProjectImage } from '@/lib/userProjects';
 import { validateImageFile, fileToDataUrl, MAX_PROJECT_IMAGES } from '@/lib/imageUtils';
+import { createSupabaseUserProject } from '@/lib/supabase/userProjects';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
 import SectionHeader from '@/components/ui/SectionHeader';
 import Button from '@/components/ui/Button';
 
@@ -51,6 +53,7 @@ const errorClass = 'mt-1.5 text-xs text-[var(--color-danger)]';
 
 export default function AddProjectPage() {
   const router = useRouter();
+  const { status, user } = useAuthStatus();
   const [values, setValues] = useState<FormValues>({
     title: '',
     description: '',
@@ -59,6 +62,8 @@ export default function AddProjectPage() {
     notes: '',
   });
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // Multi-image state
   const [images, setImages] = useState<ProjectImage[]>([]);
@@ -106,22 +111,35 @@ export default function AddProjectPage() {
     setImages((prev) => prev.map((img) => ({ ...img, isCover: img.id === imgId })));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setHasSubmitted(true);
     setImageError('');
+    setSubmitError('');
     if (hasErrors) return;
 
-    saveUserProject({
+    setIsSubmitting(true);
+    const projectData = {
       title: values.title.trim(),
       description: values.description.trim(),
       category: values.category,
       patternLink: values.patternLink.trim(),
       notes: values.notes.trim(),
       images: images.length > 0 ? images : undefined,
-    });
+    };
 
-    router.push('/discover');
+    try {
+      if (status === 'authenticated' && user) {
+        const saved = await createSupabaseUserProject(user.id, projectData);
+        cacheUserProjectLocally(saved);
+      } else {
+        saveUserProject(projectData);
+      }
+      router.push('/discover');
+    } catch {
+      setSubmitError('Something went wrong saving your project. Please try again.');
+      setIsSubmitting(false);
+    }
   }
 
   // ── Form ────────────────────────────────────────────────────────────────────
@@ -325,12 +343,16 @@ export default function AddProjectPage() {
           </div>
 
           {/* Submit */}
+          {submitError && (
+            <p className={errorClass}>{submitError}</p>
+          )}
           <Button
             type="submit"
             variant="primary"
             className="w-full"
+            disabled={isSubmitting}
           >
-            Save project
+            {isSubmitting ? 'Saving…' : 'Save project'}
           </Button>
 
         </form>
