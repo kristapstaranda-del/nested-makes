@@ -86,7 +86,7 @@ async function uploadImageAndGetPath(
 
   // Pass the Blob directly — Supabase SDK handles the HTTP encoding internally.
   const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
-    upsert: true,
+    upsert: false,
     contentType,
   });
 
