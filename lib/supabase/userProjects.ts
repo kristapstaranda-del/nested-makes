@@ -7,8 +7,21 @@ export function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
+// ── Auth helper ──────────────────────────────────────────────────────────────
+
+async function getAuthUser(): Promise<{ id: string }> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) throw new Error('Not authenticated');
+  return data.user;
+}
+
+// ── Storage helpers ──────────────────────────────────────────────────────────
+
 function storagePath(userId: string, projectId: string, imageId: string): string {
-  return `${userId}/${projectId}/${imageId}`;
+  // Path format: {userId}/{projectId}/{imageId}.webp
+  // First segment MUST equal auth.uid() to pass RLS:
+  //   (storage.foldername(name))[1] = auth.uid()::text
+  return `${userId}/${projectId}/${imageId}.webp`;
 }
 
 function getPublicUrl(path: string): string {
@@ -16,15 +29,48 @@ function getPublicUrl(path: string): string {
   return data.publicUrl;
 }
 
-async function uploadImage(path: string, dataUrl: string): Promise<void> {
+async function uploadImage(
+  path: string,
+  dataUrl: string,
+  authUserId: string,
+): Promise<void> {
+  const firstFolder = path.split('/')[0];
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Uploading project image', {
+      bucket: BUCKET,
+      path,
+      firstFolder,
+      userId: authUserId,
+      firstFolderMatchesUser: firstFolder === authUserId,
+    });
+  }
+
+  if (firstFolder !== authUserId) {
+    throw new Error(
+      `Storage path mismatch: first folder "${firstFolder}" does not match auth user "${authUserId}". ` +
+        'Upload would be rejected by RLS.',
+    );
+  }
+
   const res = await fetch(dataUrl);
   const blob = await res.blob();
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Uploading project image blob', {
+      blobType: blob.type,
+      blobSize: blob.size,
+    });
+  }
+
   const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
     upsert: true,
-    contentType: blob.type,
+    contentType: blob.type || 'image/webp',
   });
   if (error) throw error;
 }
+
+// ── DB row shape ─────────────────────────────────────────────────────────────
 
 interface DbProjectRow {
   id: string;
@@ -70,6 +116,8 @@ function rowToUserProject(row: DbProjectRow): UserProject {
   };
 }
 
+// ── Read ──────────────────────────────────────────────────────────────────────
+
 export async function getSupabaseUserProjects(userId: string): Promise<UserProject[]> {
   const { data, error } = await supabase
     .from('user_projects')
@@ -81,7 +129,10 @@ export async function getSupabaseUserProjects(userId: string): Promise<UserProje
   return (data as DbProjectRow[]).map(rowToUserProject);
 }
 
-export async function getSupabaseUserProject(id: string, userId: string): Promise<UserProject | null> {
+export async function getSupabaseUserProject(
+  id: string,
+  userId: string,
+): Promise<UserProject | null> {
   const { data, error } = await supabase
     .from('user_projects')
     .select('*, project_images(*)')
@@ -94,33 +145,44 @@ export async function getSupabaseUserProject(id: string, userId: string): Promis
   return rowToUserProject(data as DbProjectRow);
 }
 
+// ── Write ─────────────────────────────────────────────────────────────────────
+
 export type CreateProjectData = Omit<UserProject, 'id' | 'createdAt' | 'sourceType'>;
 
 export async function createSupabaseUserProject(
-  userId: string,
+  _callerUserId: string,
   data: CreateProjectData,
 ): Promise<UserProject> {
-  const projectId = crypto.randomUUID();
+  // Always use the active Supabase session — never trust the caller-supplied ID
+  // for anything that touches Storage paths or DB user_id.
+  const authUser = await getAuthUser();
 
-  const { error: insertError } = await supabase.from('user_projects').insert({
-    id: projectId,
-    user_id: userId,
-    title: data.title,
-    description: data.description || null,
-    category: data.category,
-    difficulty: data.difficulty ?? null,
-    pattern_link: data.patternLink || null,
-    notes: data.notes || null,
-    is_public: true,
-  });
+  // Insert project row; let the DB generate the UUID so projectId is authoritative.
+  const { data: inserted, error: insertError } = await supabase
+    .from('user_projects')
+    .insert({
+      user_id: authUser.id,
+      title: data.title,
+      description: data.description || null,
+      category: data.category,
+      difficulty: data.difficulty ?? null,
+      pattern_link: data.patternLink || null,
+      notes: data.notes || null,
+      is_public: true,
+    })
+    .select('id')
+    .single();
   if (insertError) throw insertError;
 
+  const projectId: string = inserted.id;
+
+  // Upload images using the DB-returned projectId and the verified auth user ID.
   if (data.images && data.images.length > 0) {
     for (let i = 0; i < data.images.length; i++) {
       const img = data.images[i];
       const imageId = crypto.randomUUID();
-      const path = storagePath(userId, projectId, imageId);
-      await uploadImage(path, img.dataUrl);
+      const path = storagePath(authUser.id, projectId, imageId);
+      await uploadImage(path, img.dataUrl, authUser.id);
       const { error: imgError } = await supabase.from('project_images').insert({
         id: imageId,
         project_id: projectId,
@@ -132,16 +194,18 @@ export async function createSupabaseUserProject(
     }
   }
 
-  const saved = await getSupabaseUserProject(projectId, userId);
+  const saved = await getSupabaseUserProject(projectId, authUser.id);
   if (!saved) throw new Error('Project not found after create');
   return saved;
 }
 
 export async function updateSupabaseUserProject(
   id: string,
-  userId: string,
+  _callerUserId: string,
   data: CreateProjectData,
 ): Promise<UserProject> {
+  const authUser = await getAuthUser();
+
   const { error: updateError } = await supabase
     .from('user_projects')
     .update({
@@ -154,7 +218,7 @@ export async function updateSupabaseUserProject(
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-    .eq('user_id', userId);
+    .eq('user_id', authUser.id);
   if (updateError) throw updateError;
 
   const { data: existingRows, error: fetchError } = await supabase
@@ -183,6 +247,7 @@ export async function updateSupabaseUserProject(
   for (let i = 0; i < incomingImages.length; i++) {
     const img = incomingImages[i];
     if (img.storagePath) {
+      // Existing Storage image — update cover flag + sort order only
       const existingRow = (existingRows ?? []).find((r) => r.storage_path === img.storagePath);
       if (existingRow) {
         await supabase
@@ -191,9 +256,10 @@ export async function updateSupabaseUserProject(
           .eq('id', existingRow.id);
       }
     } else {
+      // New base64 image — upload and insert
       const imageId = crypto.randomUUID();
-      const path = storagePath(userId, id, imageId);
-      await uploadImage(path, img.dataUrl);
+      const path = storagePath(authUser.id, id, imageId);
+      await uploadImage(path, img.dataUrl, authUser.id);
       await supabase.from('project_images').insert({
         id: imageId,
         project_id: id,
@@ -204,7 +270,7 @@ export async function updateSupabaseUserProject(
     }
   }
 
-  const updated = await getSupabaseUserProject(id, userId);
+  const updated = await getSupabaseUserProject(id, authUser.id);
   if (!updated) throw new Error('Project not found after update');
   return updated;
 }
