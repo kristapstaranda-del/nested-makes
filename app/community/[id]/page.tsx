@@ -3,13 +3,18 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getPublicProfile, type PublicProfile } from '@/lib/communityProfiles';
+import { getPublicProfile, type PublicProfile, type PublicCheckInEntry } from '@/lib/communityProfiles';
 import { getAvatarById } from '@/lib/avatarLibrary';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { projects as staticProjects } from '@/app/data/projects';
 import BadgeDisplay from '@/components/profile/BadgeDisplay';
 import Card from '@/components/ui/Card';
 import ImageLightbox from '@/components/ui/ImageLightbox';
+import { getSupabaseProfile } from '@/lib/supabase/profiles';
+import { getCheckInsForUser } from '@/lib/supabase/checkIns';
+
+// Detect UUID format — Supabase auth user IDs are UUIDs; mock profile IDs are not.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function formatDate(dateStr: string): string {
   try {
@@ -39,9 +44,63 @@ export default function CommunityProfilePage() {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const found = getPublicProfile(id);
-    setProfile(found);
-    setFinishedMakes(getFinishedMakesByAuthor(id));
+    if (!id) {
+      setProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      // Finished makes still live in localStorage (Phase 2.3), so this is sync.
+      setFinishedMakes(getFinishedMakesByAuthor(id));
+
+      // If id is a UUID, the profile lives in Supabase auth.users → profiles.
+      if (UUID_RE.test(id)) {
+        try {
+          const [remote, checkIns] = await Promise.all([
+            getSupabaseProfile(id),
+            getCheckInsForUser(id, { limit: 5 }),
+          ]);
+          if (cancelled) return;
+          if (!remote) {
+            setProfile(null);
+            return;
+          }
+          const recentCheckIns: PublicCheckInEntry[] = checkIns.map((ci) => ({
+            id: ci.id,
+            message: ci.message,
+            date: ci.date,
+            displayName: ci.displayName,
+            authorId: ci.authorId,
+            imageUrl: ci.imageUrl,
+          }));
+          setProfile({
+            id: remote.id,
+            displayName: remote.nickname || 'Maker',
+            about: remote.about ?? '',
+            craftInterests: remote.craft_interests ?? [],
+            avatarId: remote.avatar_id ?? undefined,
+            avatarColor: remote.avatar_color ?? undefined,
+            publicBadges: [],     // achievements migration deferred to Phase 2.4
+            recentCheckIns,
+            finishedProjects: [], // finished-make-derived data added in Phase 2.3
+          });
+        } catch (e) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('[CommunityProfilePage] Supabase load failed', e);
+          }
+          if (!cancelled) setProfile(null);
+        }
+        return;
+      }
+
+      // Non-UUID id → fall back to mock profile lookup (Phase 2.4 removes this).
+      setProfile(getPublicProfile(id));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (profile === 'loading') {

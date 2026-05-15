@@ -18,7 +18,6 @@ import ProfileActivity from '@/components/profile/ProfileActivity';
 import ProfileProjects from '@/components/profile/ProfileProjects';
 import EditProfileModal from '@/components/profile/EditProfileModal';
 import NotificationFeed from '@/components/notifications/NotificationFeed';
-import { getPublicCheckIns } from '@/lib/authorResolution';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { getSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
@@ -36,17 +35,12 @@ import {
   type ActiveHabit,
   type HabitLog,
 } from '@/lib/supabase/habits';
+import {
+  getCheckInsForUser,
+  type CheckInWithAuthor,
+} from '@/lib/supabase/checkIns';
 
-interface CheckIn {
-  id: string;
-  challengeId?: string;
-  projectId?: string;
-  habitId?: string;
-  date: string;
-  message: string;
-  displayName: string;
-  imageUrl?: string;
-}
+type CheckIn = CheckInWithAuthor;
 
 function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): ProfileData {
   return {
@@ -89,9 +83,6 @@ export default function ProfilePage() {
     const profileData = getProfileData();
     setProfile(profileData);
 
-    // Public check-ins still live in localStorage during Phase 2.1.
-    setPublicCheckIns(getPublicCheckIns());
-
     setUserProjects(getUserProjects());
 
     const userId = getOrCreateUserId();
@@ -109,7 +100,7 @@ export default function ProfilePage() {
         if (cancelled) return;
         if (!data.user) return; // anonymous → leave empty
 
-        const [active, archived, habit, logs, cs, bs, l7c, l7r] = await Promise.all([
+        const [active, archived, habit, logs, cs, bs, l7c, l7r, myCheckIns] = await Promise.all([
           getActiveChallenges(),
           getArchivedChallenges(),
           getActiveHabit(),
@@ -118,6 +109,7 @@ export default function ProfilePage() {
           getBestHabitStreak(),
           getLast7DaysCompletionCount(),
           getLast7DaysCompletionRate(),
+          getCheckInsForUser(data.user.id),
         ]);
         if (cancelled) return;
         setActiveChallenges(active);
@@ -128,6 +120,27 @@ export default function ProfilePage() {
         setBestStreak(bs);
         setLast7DaysCount(l7c);
         setLast7DaysRate(l7r);
+        setPublicCheckIns(myCheckIns);
+
+        // Mirror current user's check-ins to legacy localStorage so the
+        // achievements module sees them. Phase 2.4 removes this.
+        try {
+          localStorage.setItem(
+            'publicCheckIns',
+            JSON.stringify(
+              myCheckIns.map((ci) => ({
+                id: ci.id,
+                challengeId: ci.challengeId,
+                date: ci.date,
+                message: ci.message,
+                displayName: ci.displayName,
+                authorId: ci.authorId,
+                authorAvatarId: ci.authorAvatarId,
+                imageUrl: ci.imageUrl,
+              })),
+            ),
+          );
+        } catch {}
 
         // Mirror to legacy localStorage keys for the achievements module.
         // Phase 2.4 removes this once achievements are migrated.

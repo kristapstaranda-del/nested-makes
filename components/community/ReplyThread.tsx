@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getRepliesForCheckIn, saveReply, type CheckInReply } from '@/lib/checkInReplies';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
+import {
+  createReply,
+  getRepliesForCheckIn,
+  type CheckInReplyWithAuthor,
+} from '@/lib/supabase/checkInReplies';
+import { supabase } from '@/lib/supabase/client';
 import { getProfileData } from '@/lib/profile';
 import AuthorLink from '@/components/community/AuthorLink';
-import { getPublicCheckIns } from '@/lib/authorResolution';
 import { addNotification } from '@/lib/notifications';
 
 const MAX_REPLY_CHARS = 200;
@@ -21,41 +24,66 @@ interface ReplyThreadProps {
 }
 
 export default function ReplyThread({ checkInId, compact, challengeId }: ReplyThreadProps) {
-  const [replies, setReplies] = useState<CheckInReply[]>([]);
+  const [replies, setReplies] = useState<CheckInReplyWithAuthor[]>([]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setReplies(getRepliesForCheckIn(checkInId));
+    let cancelled = false;
+    getRepliesForCheckIn(checkInId)
+      .then((rows) => {
+        if (!cancelled) setReplies(rows);
+      })
+      .catch(() => {
+        // Leave empty on error.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [checkInId]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const msg = draft.trim();
-    if (!msg) return;
+    if (!msg || submitting) return;
+    setSubmitting(true);
+    try {
+      const newReply = await createReply({ checkInId, message: msg });
+      setReplies((prev) => [...prev, newReply]);
+      setDraft('');
+      setComposerOpen(false);
+      setShowAll(true);
 
-    const authorId = getOrCreateUserId();
-    const displayName = getProfileData().nickname || 'Maker';
-
-    const newReply = saveReply({ checkInId, authorId, displayName, message: msg });
-    setReplies((prev) => [...prev, newReply]);
-    setDraft('');
-    setComposerOpen(false);
-    // Keep newly added reply visible if we were collapsed
-    setShowAll(true);
-
-    // Notify check-in owner
-    const checkIn = getPublicCheckIns().find((ci) => ci.id === checkInId);
-    if (checkIn?.authorId && checkIn.authorId !== authorId) {
-      addNotification({
-        type: 'check_in_replied',
-        recipientId: checkIn.authorId,
-        actorId: authorId,
-        actorName: displayName,
-        targetType: 'check_in',
-        targetId: checkInId,
-        targetContext: checkIn.challengeId,
-      });
+      // Notify check-in owner (best effort).
+      const { data: userData } = await supabase.auth.getUser();
+      const me = userData.user?.id;
+      if (me) {
+        const { data: row } = await supabase
+          .from('check_ins')
+          .select('user_id, challenge_id')
+          .eq('id', checkInId)
+          .maybeSingle();
+        const owner = (row as { user_id: string; challenge_id: string } | null) ?? null;
+        if (owner && owner.user_id !== me) {
+          const actorName = getProfileData().nickname || 'Maker';
+          addNotification({
+            type: 'check_in_replied',
+            recipientId: owner.user_id,
+            actorId: me,
+            actorName,
+            targetType: 'check_in',
+            targetId: checkInId,
+            targetContext: owner.challenge_id,
+          });
+        }
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[ReplyThread] reply submit failed', e);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -64,7 +92,7 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
     setDraft('');
   };
 
-  // ── Compact mode: Reply affordance + count hint linking to the full updates page
+  // ── Compact mode: Reply affordance + count hint linking to full updates page
   if (compact) {
     if (!challengeId) return null;
     return (
@@ -108,7 +136,7 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
         )}
       </div>
 
-      {/* Replies list — always visible when replies exist */}
+      {/* Replies list */}
       {replies.length > 0 && (() => {
         const hasOverflow = replies.length > REPLY_PREVIEW;
         const visible = showAll ? replies : replies.slice(0, REPLY_PREVIEW);
@@ -131,7 +159,6 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
                 <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
                   {reply.message}
                 </p>
-                {/* No reaction or reply button on replies — one level only */}
               </div>
             ))}
             {hasOverflow && (
@@ -166,10 +193,10 @@ export default function ReplyThread({ checkInId, compact, challengeId }: ReplyTh
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || submitting}
               className="rounded-lg bg-[var(--color-brand-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 hover:bg-[var(--color-brand-primary-hover)] transition-colors"
             >
-              Reply
+              {submitting ? 'Sending…' : 'Reply'}
             </button>
             <button
               type="button"

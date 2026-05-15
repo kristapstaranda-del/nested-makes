@@ -10,21 +10,14 @@ import ImageLightbox from '@/components/ui/ImageLightbox';
 import ReactionButton from '@/components/community/ReactionButton';
 import ReplyThread from '@/components/community/ReplyThread';
 import AuthorLink from '@/components/community/AuthorLink';
-import { getPublicCheckIns } from '@/lib/authorResolution';
 import { getAvatarById } from '@/lib/avatarLibrary';
+import {
+  getCheckInsForChallenge,
+  type CheckInWithAuthor,
+} from '@/lib/supabase/checkIns';
+import { getChallenge } from '@/lib/supabase/challenges';
 
-interface CheckIn {
-  id: string;
-  challengeId?: string;
-  projectId?: string;
-  habitId?: string;
-  date: string;
-  message: string;
-  displayName: string;
-  authorId?: string;
-  authorAvatarId?: string;
-  imageUrl?: string;
-}
+type CheckIn = CheckInWithAuthor;
 
 function formatDate(dateStr: string): string {
   try {
@@ -44,42 +37,44 @@ export default function ChallengeUpdatesPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    let projectId: string | undefined;
-
-    // Load and filter check-ins for this challenge — authorId resolved via backfill
-    {
-      const all = getPublicCheckIns() as CheckIn[];
-      const filtered = all
-        .filter((ci) => ci.challengeId === challengeId && !ci.habitId)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setCheckIns(filtered);
-      projectId = filtered[0]?.projectId;
+    if (!challengeId) {
+      setIsLoading(false);
+      return;
     }
 
-    // Fall back to activeChallenges for projectId if check-ins are empty
-    if (!projectId) {
+    let cancelled = false;
+    (async () => {
       try {
-        const activesRaw = localStorage.getItem('activeChallenges');
-        if (activesRaw) {
-          const actives: { challengeId: string; projectId: string }[] = JSON.parse(activesRaw);
-          const found = actives.find((c) => c.challengeId === challengeId);
-          if (found) projectId = found.projectId;
+        // Fetch check-ins + the challenge row in parallel.
+        const [rows, challenge] = await Promise.all([
+          getCheckInsForChallenge(challengeId),
+          getChallenge(challengeId),
+        ]);
+        if (cancelled) return;
+        setCheckIns(rows);
+
+        const projectId = challenge?.projectId;
+        if (projectId) {
+          const userProj = getUserProjects().find((p) => p.id === projectId);
+          if (userProj) {
+            setProjectTitle(userProj.title);
+          } else {
+            const staticProj = staticProjects.find((p) => String(p.id) === projectId);
+            if (staticProj) setProjectTitle(staticProj.title);
+          }
         }
-      } catch {}
-    }
-
-    // Resolve project title
-    if (projectId) {
-      const userProj = getUserProjects().find((p) => p.id === projectId);
-      if (userProj) {
-        setProjectTitle(userProj.title);
-      } else {
-        const staticProj = staticProjects.find((p) => String(p.id) === projectId);
-        if (staticProj) setProjectTitle(staticProj.title);
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ChallengeUpdatesPage] load failed', e);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    }
+    })();
 
-    setIsLoading(false);
+    return () => {
+      cancelled = true;
+    };
   }, [challengeId]);
 
   if (isLoading) {

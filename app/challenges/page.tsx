@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { projects } from '@/app/data/projects';
 import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
-import { getOrCreateUserId, MOCK_PROFILES } from '@/lib/communityProfiles';
+import { MOCK_PROFILES } from '@/lib/communityProfiles';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
 import SectionHeader from '@/components/ui/SectionHeader';
@@ -20,8 +20,12 @@ import { validateImageFile, fileToDataUrl, sanitizeCoverImage } from '@/lib/imag
 import ReactionButton from '@/components/community/ReactionButton';
 import ReplyThread from '@/components/community/ReplyThread';
 import AuthorLink from '@/components/community/AuthorLink';
-import { getPublicCheckIns } from '@/lib/authorResolution';
 import { getCurrentHabitStreak } from '@/lib/habitStats';
+import {
+  createCheckIn,
+  getCheckInsForChallenges,
+  type CheckInWithAuthor,
+} from '@/lib/supabase/checkIns';
 import { getProfileData } from '@/lib/profile';
 import { getAvatarById } from '@/lib/avatarLibrary';
 import { supabase } from '@/lib/supabase/client';
@@ -52,18 +56,8 @@ interface Project {
   craftType: string;
 }
 
-interface CheckIn {
-  id: string;
-  challengeId?: string;
-  projectId?: string;
-  habitId?: string;
-  date: string; // YYYY-MM-DD
-  message: string;
-  displayName: string;
-  authorId?: string; // stable device ID for linking to public profile
-  authorAvatarId?: string;
-  imageUrl?: string; // optional base64 data URL for progress photo
-}
+// Local alias — the new Supabase shape covers everything the UI needs.
+type CheckIn = CheckInWithAuthor;
 
 export default function ChallengesPage() {
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
@@ -271,43 +265,31 @@ export default function ChallengesPage() {
     } catch {}
   }, [activeChallenges, archivedChallenges, activeHabit, habitLogs, authStatus, isLoading]);
 
-  // Check-ins still live in localStorage during Phase 2.1 — load them after
-  // the active challenges list resolves so the legacy challengeId backfill
-  // can attach orphan check-ins to the first active challenge.
+  // Load check-ins from Supabase for the active challenges in one batched
+  // query. Runs whenever the active challenge list changes (e.g. after
+  // archive/restore).
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
-
-    // === migration logic: move habit entries from publicCheckIns to habitLogs ===
-    // (Kept for now; harmless to run every mount, removed in Phase 2.4.)
-    try {
-      const publicCheckInsRaw = localStorage.getItem('publicCheckIns');
-      let allCheckIns: CheckIn[] = [];
-      if (publicCheckInsRaw) {
-        try {
-          allCheckIns = JSON.parse(publicCheckInsRaw);
-        } catch {
-          allCheckIns = [];
-        }
-      }
-      const habitEntries = allCheckIns.filter((ci) => ci.habitId);
-      if (habitEntries.length > 0) {
-        const projectOnlyCheckIns = allCheckIns.filter((ci) => !ci.habitId);
-        localStorage.setItem('publicCheckIns', JSON.stringify(projectOnlyCheckIns));
-      }
-    } catch {}
-
-    let all: CheckIn[] = getPublicCheckIns() as CheckIn[];
-    if (all.length && activeChallenges.length) {
-      const firstId = activeChallenges[0].challengeId;
-      all = all.map((ci) => (ci.challengeId ? ci : { ...ci, challengeId: firstId }));
+    if (activeChallenges.length === 0) {
+      setCheckInsByChallenge({});
+      return;
     }
-    const map: Record<string, CheckIn[]> = {};
-    all.forEach((ci) => {
-      if (!ci.challengeId) return;
-      if (!map[ci.challengeId]) map[ci.challengeId] = [];
-      map[ci.challengeId].push(ci);
-    });
-    setCheckInsByChallenge(map);
+
+    let cancelled = false;
+    const ids = activeChallenges.map((c) => c.challengeId);
+    getCheckInsForChallenges(ids)
+      .then((byChallenge) => {
+        if (!cancelled) setCheckInsByChallenge(byChallenge);
+      })
+      .catch((e) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ChallengesPage] check-ins load failed', e);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [authStatus, activeChallenges]);
 
   const getDifficultyColor = (difficulty: string) => {
@@ -714,51 +696,65 @@ export default function ChallengesPage() {
     }
   };
 
-  const handleCheckInSubmit = (challenge: ActiveChallenge) => {
+  const handleCheckInSubmit = async (challenge: ActiveChallenge) => {
     const msg = (checkInMessages[challenge.challengeId] || '').trim();
 
     const existingList = checkInsByChallenge[challenge.challengeId] || [];
     if (existingList.some((ci) => ci.date === today)) {
-      // already done today
-      return;
+      return; // already done today
     }
 
-    const newCheckIn: CheckIn = {
-      id: generateId(),
-      challengeId: challenge.challengeId,
-      projectId: challenge.projectId,
-      date: today,
-      message: msg,
-      displayName: authorName,
-      authorId: getOrCreateUserId(),
-      authorAvatarId: authorAvatarId,
-      imageUrl: checkInImages[challenge.challengeId] || undefined,
-    };
-
-    // persist globally
-    let all: CheckIn[] = [];
-    const saved = localStorage.getItem('publicCheckIns');
-    if (saved) {
-      try {
-        all = JSON.parse(saved);
-      } catch {}
-    }
-    all.push(newCheckIn);
     try {
-      localStorage.setItem('publicCheckIns', JSON.stringify(all));
-    } catch {}
+      const saved = await createCheckIn({
+        challengeId: challenge.challengeId,
+        date: today,
+        message: msg,
+        imageDataUrl: checkInImages[challenge.challengeId] || undefined,
+      });
 
-    // update local state
-    setCheckInsByChallenge((map) => ({
-      ...map,
-      [challenge.challengeId]: [newCheckIn, ...(map[challenge.challengeId] || [])],
-    }));
-    setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: '' }));
-    setCheckInImages((imgs) => { const next = { ...imgs }; delete next[challenge.challengeId]; return next; });
-    setCheckInImageErrors((e) => ({ ...e, [challenge.challengeId]: '' }));
+      // Optimistic: prepend the new check-in to the current list.
+      setCheckInsByChallenge((map) => ({
+        ...map,
+        [challenge.challengeId]: [saved, ...(map[challenge.challengeId] || [])],
+      }));
 
-    // Show achievement-aware feedback for public check-in
-    showFeedback('public_checkin_created');
+      // Mirror to legacy localStorage so lib/achievements.ts can detect
+      // community badges (community-spark, chatty-crafter). Phase 2.4 removes.
+      try {
+        const raw = localStorage.getItem('publicCheckIns');
+        const arr = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(arr)) {
+          arr.push({
+            id: saved.id,
+            challengeId: saved.challengeId,
+            date: saved.date,
+            message: saved.message,
+            displayName: saved.displayName,
+            authorId: saved.authorId,
+            authorAvatarId: saved.authorAvatarId,
+            imageUrl: saved.imageUrl,
+          });
+          localStorage.setItem('publicCheckIns', JSON.stringify(arr));
+        }
+      } catch {}
+
+      setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: '' }));
+      setCheckInImages((imgs) => {
+        const next = { ...imgs };
+        delete next[challenge.challengeId];
+        return next;
+      });
+      setCheckInImageErrors((e) => ({ ...e, [challenge.challengeId]: '' }));
+
+      showFeedback('public_checkin_created');
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : 'Could not save your check-in. Please try again.';
+      setCheckInImageErrors((errs) => ({ ...errs, [challenge.challengeId]: message }));
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[handleCheckInSubmit] failed', e);
+      }
+    }
   };
 
   const handleHabitStatus = async (status: 'done' | 'missed') => {

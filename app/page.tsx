@@ -10,9 +10,11 @@ import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
 import { getProfileData } from '@/lib/profile';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
-import { getPublicCheckIns } from '@/lib/authorResolution';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getActiveChallenges, type ActiveChallenge } from '@/lib/supabase/challenges';
+import {
+  getCheckInCountsByChallenge,
+  getRecentCheckInCountForUser,
+} from '@/lib/supabase/checkIns';
 
 type AuthState = 'loading' | 'logged-out' | 'logged-in';
 
@@ -85,24 +87,24 @@ export default function TodayPage() {
     const userProjs = getUserProjects().map(normalizeUserProject);
     setAllProjects([...(staticProjects as DiscoverProject[]), ...userProjs]);
 
-    // Check-in stats for momentum + per-challenge counts
-    const userId = getOrCreateUserId();
-    const allCheckIns = getPublicCheckIns();
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const cutoff = sevenDaysAgo.toISOString().split('T')[0];
-
-    setWeeklyCheckInCount(
-      allCheckIns.filter((ci) => ci.authorId === userId && ci.date >= cutoff).length,
-    );
-
-    const perChallenge: Record<string, number> = {};
-    allCheckIns
-      .filter((ci) => ci.authorId === userId && ci.challengeId)
-      .forEach((ci) => {
-        if (ci.challengeId) perChallenge[ci.challengeId] = (perChallenge[ci.challengeId] ?? 0) + 1;
-      });
-    setCheckInsPerChallenge(perChallenge);
+    // Check-in stats for momentum + per-challenge counts — pulled from Supabase
+    (async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      if (cancelled || !userData.user) return;
+      try {
+        const [weekly, perChallenge] = await Promise.all([
+          getRecentCheckInCountForUser(userData.user.id, 7),
+          getCheckInCountsByChallenge(userData.user.id),
+        ]);
+        if (cancelled) return;
+        setWeeklyCheckInCount(weekly);
+        setCheckInsPerChallenge(perChallenge);
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[TodayPage] check-in counts failed', e);
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;

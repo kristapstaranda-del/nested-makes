@@ -12,10 +12,28 @@ import { getOrCreateUserId, MOCK_PROFILES } from '@/lib/communityProfiles';
 import { getProfileData } from '@/lib/profile';
 import { getPublicCheckIns, type PublicCheckIn } from '@/lib/authorResolution';
 import { getFinishedMakes, type FinishedMake } from '@/lib/finishedMakes';
-import { toggleReaction } from '@/lib/checkInReactions';
 import { toggleMakeLike } from '@/lib/finishedMakeReactions';
 import { saveComment } from '@/lib/finishedMakeComments';
-import { saveReply } from '@/lib/checkInReplies';
+
+// Phase 2.2: check-in reactions/replies moved to Supabase. The legacy
+// "act as another user" simulator can no longer drive those tables from
+// the client (RLS), so the helpers below are stubbed to no-ops. Rework or
+// remove this dev page in Phase 2.4 once the migration completes.
+const toggleReaction = (_checkInId: string, _actorId: string): void => {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('[dev/notifications] toggleReaction is disabled after Phase 2.2');
+  }
+};
+const saveReply = (_args: {
+  checkInId: string;
+  authorId: string;
+  displayName: string;
+  message: string;
+}): void => {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('[dev/notifications] saveReply is disabled after Phase 2.2');
+  }
+};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

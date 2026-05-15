@@ -11,9 +11,12 @@ import {
   archiveChallenge as archiveChallengeRow,
   getActiveChallenges,
 } from '@/lib/supabase/challenges';
+import {
+  createCheckIn,
+  hasCheckInForToday,
+} from '@/lib/supabase/checkIns';
 import { getFinishedMakesForProject, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { getCommentsForMake } from '@/lib/finishedMakeComments';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getProfileData } from '@/lib/profile';
 import StartChallengeButton from '@/components/StartChallengeButton';
 import Card from '@/components/ui/Card';
@@ -164,18 +167,19 @@ export default function ProjectPage() {
   useEffect(() => {
     if (!activeChallenge) return;
     setDisplayName(getProfileData().nickname || 'Maker');
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const raw = localStorage.getItem('publicCheckIns');
-      if (raw) {
-        const all = JSON.parse(raw);
-        if (Array.isArray(all)) {
-          setCheckInDoneToday(
-            all.some((ci) => ci.challengeId === activeChallenge.challengeId && ci.date === today)
-          );
-        }
-      }
-    } catch {}
+
+    const today = new Date().toISOString().split('T')[0];
+    let cancelled = false;
+    hasCheckInForToday(activeChallenge.challengeId, today)
+      .then((done) => {
+        if (!cancelled) setCheckInDoneToday(done);
+      })
+      .catch(() => {
+        // Best effort — leave the button enabled on error.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeChallenge?.challengeId]);
 
   // ── Derived image list (for lightbox; empty until userProject loads) ───────
@@ -207,34 +211,25 @@ export default function ProjectPage() {
   }, [lightboxIndex, allLightboxImages.length]);
 
   // ── Workspace handlers ─────────────────────────────────────────────────────
-  function handleCheckIn() {
+  async function handleCheckIn() {
     if (!activeChallenge) return;
     const msg = checkInMessage.trim();
     if (!msg) return;
     const today = new Date().toISOString().split('T')[0];
-    const newId =
-      typeof window !== 'undefined' && window.crypto?.randomUUID
-        ? window.crypto.randomUUID()
-        : Date.now().toString();
-    const newCheckIn = {
-      id: newId,
-      challengeId: activeChallenge.challengeId,
-      projectId: id,
-      date: today,
-      message: msg,
-      displayName,
-      authorId: getOrCreateUserId(),
-    };
     try {
-      const raw = localStorage.getItem('publicCheckIns');
-      let all: object[] = [];
-      if (raw) { try { all = JSON.parse(raw); } catch { all = []; } }
-      all.push(newCheckIn);
-      localStorage.setItem('publicCheckIns', JSON.stringify(all));
-    } catch {}
-    setCheckInMessage('');
-    setCheckInDoneToday(true);
-    setCheckInJustSaved(true);
+      await createCheckIn({
+        challengeId: activeChallenge.challengeId,
+        date: today,
+        message: msg,
+      });
+      setCheckInMessage('');
+      setCheckInDoneToday(true);
+      setCheckInJustSaved(true);
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[ProjectPage handleCheckIn] failed', e);
+      }
+    }
   }
 
   async function handleArchive() {
