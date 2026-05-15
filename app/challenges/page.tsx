@@ -28,6 +28,21 @@ import { supabase } from '@/lib/supabase/client';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
 import { useAuthStatus } from '@/hooks/useAuthStatus';
 import AuthRequiredPrompt from '@/components/auth/AuthRequiredPrompt';
+import {
+  archiveChallenge as archiveChallengeRow,
+  getActiveChallenges,
+  getArchivedChallenges,
+  restoreChallenge as restoreChallengeRow,
+  type ActiveChallenge,
+} from '@/lib/supabase/challenges';
+import {
+  archiveHabit,
+  getActiveHabit,
+  getAllHabitLogs,
+  upsertHabitLog,
+  type ActiveHabit,
+  type HabitLog,
+} from '@/lib/supabase/habits';
 
 
 interface Project {
@@ -35,22 +50,6 @@ interface Project {
   title: string;
   difficulty: string;
   craftType: string;
-}
-
-
-interface ChallengePlan {
-  projectId: string;
-  plan: {
-    type: 'time_daily' | 'rows_daily' | 'days_per_week';
-    target: number;
-  };
-}
-
-interface ActiveChallenge {
-  challengeId: string;
-  projectId: string;
-  plan: ChallengePlan['plan'] | null;
-  createdAt: string;
 }
 
 interface CheckIn {
@@ -64,13 +63,6 @@ interface CheckIn {
   authorId?: string; // stable device ID for linking to public profile
   authorAvatarId?: string;
   imageUrl?: string; // optional base64 data URL for progress photo
-}
-
-interface HabitLog {
-  id: string;
-  habitId: string;
-  date: string; // YYYY-MM-DD
-  status: 'done' | 'missed';
 }
 
 export default function ChallengesPage() {
@@ -92,11 +84,7 @@ export default function ChallengesPage() {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const checkInImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  const [activeHabit, setActiveHabit] = useState<{
-    habitId: string;
-    plan: { type: 'time_daily' | 'rows_daily' | 'days_per_week'; target: number };
-    createdAt: string;
-  } | null>(null);
+  const [activeHabit, setActiveHabit] = useState<ActiveHabit | null>(null);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const { currentFeedback, showFeedback, dismissFeedback } = useMicroFeedback();
 
@@ -199,88 +187,98 @@ export default function ChallengesPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Merged project list (static + local user cache) — fast lookup for cards.
+  // Loaded synchronously so cards render even before Supabase queries finish.
   useEffect(() => {
-    // === migration logic for active challenge storage ===
-    const migrateAndReadActive = () => {
-      // try new format first
-      const existing = localStorage.getItem('activeChallenges');
-      if (existing) {
-        try {
-          const parsed = JSON.parse(existing);
-          if (
-            Array.isArray(parsed) &&
-            parsed.every(
-              (c) =>
-                c &&
-                typeof c.challengeId === 'string' &&
-                typeof c.projectId === 'string' &&
-                typeof c.createdAt === 'string'
-            )
-          ) {
-            return parsed as ActiveChallenge[];
-          }
-        } catch (e) {
-          // ignore parse errors and fall through to migration
-        }
-      }
+    const userProjs = getUserProjects().map(normalizeUserProject);
+    setAllProjects([...(projects as DiscoverProject[]), ...userProjs]);
+  }, []);
 
-      // new format was missing or invalid, attempt to migrate old key
-      const old = localStorage.getItem('activeChallenge');
-      if (old) {
-        let projectId: string | undefined;
-        let plan: ChallengePlan['plan'] | null = null;
-        try {
-          const parsedOld = JSON.parse(old);
-          if (parsedOld && typeof parsedOld === 'object') {
-            projectId = parsedOld.projectId || undefined;
-            plan = parsedOld.plan || null;
-          }
-        } catch (e) {
-          // could be a plain string saved earlier
-          projectId = old;
-        }
-
-        if (projectId) {
-          const today = new Date().toISOString().split('T')[0];
-          const newEntry: ActiveChallenge = {
-            challengeId: generateId(),
-            projectId,
-            plan,
-            createdAt: today,
-          };
-          const arr = [newEntry];
-          try {
-            localStorage.setItem('activeChallenges', JSON.stringify(arr));
-            localStorage.removeItem('activeChallenge');
-          } catch (e) {
-            // ignore storage errors
-          }
-          return arr;
-        }
-      }
-
-      return null;
-    };
-
-    const activeArr = migrateAndReadActive() || [];
-    setActiveChallenges(activeArr);
-
-    // load archived challenges
-    let arch: ActiveChallenge[] = [];
-    const archRaw = localStorage.getItem('archivedChallenges');
-    if (archRaw) {
+  // Feedback flags (set by setup pages on redirect) — read once on mount.
+  useEffect(() => {
+    const flagKeys: Array<{ key: string; type: Parameters<typeof showFeedback>[0] }> = [
+      { key: '__showChallengeJoinedFeedback', type: 'challenge_joined' },
+      { key: '__showHabitStartedFeedback', type: 'habit_started' },
+      { key: '__showChallengeUpdatedFeedback', type: 'challenge_updated' },
+      { key: '__showFinishedMakeFeedback', type: 'finished_make_submitted' },
+    ];
+    flagKeys.forEach(({ key, type }) => {
       try {
-        const parsed = JSON.parse(archRaw);
-        if (Array.isArray(parsed)) {
-          arch = parsed;
+        if (localStorage.getItem(key)) {
+          localStorage.removeItem(key);
+          setTimeout(() => showFeedback(type), 100);
         }
-      } catch {
-        arch = [];
-      }
+      } catch {}
+    });
+  }, [showFeedback]);
+
+  // Load challenges, habit, and habit logs from Supabase once auth resolves.
+  useEffect(() => {
+    if (authStatus === 'loading') return;
+
+    if (authStatus === 'anonymous') {
+      setActiveChallenges([]);
+      setArchivedChallenges([]);
+      setActiveHabit(null);
+      setHabitLogs([]);
+      setCheckInsByChallenge({});
+      setIsLoading(false);
+      return;
     }
-    setArchivedChallenges(arch);
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const [active, archived, habit, logs] = await Promise.all([
+          getActiveChallenges(),
+          getArchivedChallenges(),
+          getActiveHabit(),
+          getAllHabitLogs(),
+        ]);
+        if (cancelled) return;
+        setActiveChallenges(active);
+        setArchivedChallenges(archived);
+        setActiveHabit(habit);
+        setHabitLogs(logs);
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[ChallengesPage] failed to load Supabase data', e);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
+
+  // Mirror Supabase state to legacy localStorage keys so the achievements
+  // module (lib/achievements.ts) continues to compute earned badges against
+  // fresh data. Phase 2.4 will remove this once achievements are migrated.
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || isLoading) return;
+    try {
+      localStorage.setItem('activeChallenges', JSON.stringify(activeChallenges));
+      localStorage.setItem('archivedChallenges', JSON.stringify(archivedChallenges));
+      localStorage.setItem('habitLogs', JSON.stringify(habitLogs));
+      if (activeHabit) {
+        localStorage.setItem('activeHabit', JSON.stringify(activeHabit));
+      } else {
+        localStorage.removeItem('activeHabit');
+      }
+    } catch {}
+  }, [activeChallenges, archivedChallenges, activeHabit, habitLogs, authStatus, isLoading]);
+
+  // Check-ins still live in localStorage during Phase 2.1 — load them after
+  // the active challenges list resolves so the legacy challengeId backfill
+  // can attach orphan check-ins to the first active challenge.
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
 
     // === migration logic: move habit entries from publicCheckIns to habitLogs ===
+    // (Kept for now; harmless to run every mount, removed in Phase 2.4.)
     try {
       const publicCheckInsRaw = localStorage.getItem('publicCheckIns');
       let allCheckIns: CheckIn[] = [];
@@ -291,67 +289,18 @@ export default function ChallengesPage() {
           allCheckIns = [];
         }
       }
-
-      // filter out habit entries (those with habitId)
       const habitEntries = allCheckIns.filter((ci) => ci.habitId);
-      
       if (habitEntries.length > 0) {
-        // remove habit entries from publicCheckIns
         const projectOnlyCheckIns = allCheckIns.filter((ci) => !ci.habitId);
         localStorage.setItem('publicCheckIns', JSON.stringify(projectOnlyCheckIns));
       }
-    } catch (e) {
-      // ignore migration errors, don't crash
-    }
+    } catch {}
 
-    // === migration: convert old privateHabitLogs to new habitLogs with status ===
-    try {
-      let habitLogsArr: HabitLog[] = [];
-      const habitLogsRaw = localStorage.getItem('habitLogs');
-      
-      if (habitLogsRaw) {
-        // new format already exists, use it
-        try {
-          habitLogsArr = JSON.parse(habitLogsRaw);
-        } catch {
-          habitLogsArr = [];
-        }
-      } else {
-        // check if old privateHabitLogs exists and migrate
-        const privateLogsRaw = localStorage.getItem('privateHabitLogs');
-        if (privateLogsRaw) {
-          try {
-            const oldLogs: any[] = JSON.parse(privateLogsRaw);
-            habitLogsArr = oldLogs.map((log) => ({
-              id: log.id,
-              habitId: log.habitId,
-              date: log.date,
-              status: 'done' as const,
-            }));
-            // save to new format
-            localStorage.setItem('habitLogs', JSON.stringify(habitLogsArr));
-          } catch {
-            habitLogsArr = [];
-          }
-        }
-      }
-      
-      setHabitLogs(habitLogsArr);
-    } catch (e) {
-      // ignore migration errors, don't crash
-    }
-
-    // load public check-ins (project-only) — authorId resolved via backfill
     let all: CheckIn[] = getPublicCheckIns() as CheckIn[];
-
-    // backwards-compat: assign missing challengeId to first active challenge
-    if (all.length && activeArr.length) {
-      const firstId = activeArr[0].challengeId;
-      all = all.map((ci) =>
-        ci.challengeId ? ci : { ...ci, challengeId: firstId }
-      );
+    if (all.length && activeChallenges.length) {
+      const firstId = activeChallenges[0].challengeId;
+      all = all.map((ci) => (ci.challengeId ? ci : { ...ci, challengeId: firstId }));
     }
-
     const map: Record<string, CheckIn[]> = {};
     all.forEach((ci) => {
       if (!ci.challengeId) return;
@@ -359,74 +308,7 @@ export default function ChallengesPage() {
       map[ci.challengeId].push(ci);
     });
     setCheckInsByChallenge(map);
-
-    // load active habit separately
-    const habitRaw = localStorage.getItem('activeHabit');
-    if (habitRaw) {
-      try {
-        const h = JSON.parse(habitRaw);
-        if (
-          h &&
-          typeof h.habitId === 'string' &&
-          h.plan &&
-          typeof h.plan.type === 'string' &&
-          typeof h.plan.target === 'number'
-        ) {
-          setActiveHabit(h);
-        }
-      } catch {}
-    }
-
-    // Check if a challenge was just created and show join feedback
-    const showJoinedFeedback = localStorage.getItem('__showChallengeJoinedFeedback');
-    if (showJoinedFeedback) {
-      try {
-        localStorage.removeItem('__showChallengeJoinedFeedback');
-        setTimeout(() => {
-          showFeedback('challenge_joined');
-        }, 100);
-      } catch {}
-    }
-
-    // Check if a habit was just created and show startup feedback
-    const showHabitStartedFeedback = localStorage.getItem('__showHabitStartedFeedback');
-    if (showHabitStartedFeedback) {
-      try {
-        localStorage.removeItem('__showHabitStartedFeedback');
-        setTimeout(() => {
-          showFeedback('habit_started');
-        }, 100);
-      } catch {}
-    }
-
-    // Check if a challenge plan was just updated
-    const showChallengeUpdatedFeedback = localStorage.getItem('__showChallengeUpdatedFeedback');
-    if (showChallengeUpdatedFeedback) {
-      try {
-        localStorage.removeItem('__showChallengeUpdatedFeedback');
-        setTimeout(() => {
-          showFeedback('challenge_updated');
-        }, 100);
-      } catch {}
-    }
-
-    // Check if a finished make was just submitted
-    const showFinishedMakeFeedback = localStorage.getItem('__showFinishedMakeFeedback');
-    if (showFinishedMakeFeedback) {
-      try {
-        localStorage.removeItem('__showFinishedMakeFeedback');
-        setTimeout(() => {
-          showFeedback('finished_make_submitted');
-        }, 100);
-      } catch {}
-    }
-
-    // Merge static projects with user-created projects for challenge card lookups
-    const userProjs = getUserProjects().map(normalizeUserProject);
-    setAllProjects([...(projects as DiscoverProject[]), ...userProjs]);
-
-    setIsLoading(false);
-  }, [showFeedback]);
+  }, [authStatus, activeChallenges]);
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
@@ -442,7 +324,7 @@ export default function ChallengesPage() {
   };
 
 
-  const formatPlan = (planData: ChallengePlan['plan'] | null): string => {
+  const formatPlan = (planData: ActiveChallenge['plan'] | null): string => {
     if (!planData) return '';
     switch (planData.type) {
       case 'time_daily':
@@ -454,79 +336,77 @@ export default function ChallengesPage() {
     }
   };
 
-  const archiveChallenge = (challengeId: string) => {
+  const archiveChallenge = async (challengeId: string) => {
     if (!window.confirm('Are you sure you want to archive this challenge?')) return;
-    // remove from state
+
+    // Optimistic UI: move locally first, then persist.
+    const target = activeChallenges.find((c) => c.challengeId === challengeId);
     setActiveChallenges((prev) => prev.filter((c) => c.challengeId !== challengeId));
+    if (target) setArchivedChallenges((prev) => [target, ...prev]);
 
-    // update localStorage activeChallenges
     try {
-      const existing = localStorage.getItem('activeChallenges');
-      let arr: any[] = [];
-      if (existing) {
-        arr = JSON.parse(existing) || [];
-      }
-      const idx = arr.findIndex((c) => c.challengeId === challengeId);
-      let removed: any = null;
-      if (idx !== -1) {
-        removed = arr.splice(idx, 1)[0];
-        localStorage.setItem('activeChallenges', JSON.stringify(arr));
-      }
-      if (removed) {
-        const archivedRaw = localStorage.getItem('archivedChallenges');
-        let archived: any[] = [];
-        if (archivedRaw) {
-          try {
-            archived = JSON.parse(archivedRaw) || [];
-          } catch {}
-        }
-        archived.push(removed);
-        localStorage.setItem('archivedChallenges', JSON.stringify(archived));
-      }
+      await archiveChallengeRow(challengeId);
+      showFeedback('challenge_archived');
     } catch (e) {
-      // ignore errors
+      // Roll back on failure.
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[archiveChallenge] failed, rolling back', e);
+      }
+      if (target) {
+        setActiveChallenges((prev) => [...prev, target]);
+        setArchivedChallenges((prev) =>
+          prev.filter((c) => c.challengeId !== challengeId),
+        );
+      }
     }
-
-    // Show achievement-aware feedback
-    showFeedback('challenge_archived');
   };
 
-  const restoreChallenge = (challenge: ActiveChallenge) => {
-    // move from archived -> active
+  const restoreChallenge = async (challenge: ActiveChallenge) => {
+    // Optimistic UI: move locally first, then persist.
     setArchivedChallenges((prev) => prev.filter((c) => c.challengeId !== challenge.challengeId));
     setActiveChallenges((prev) => [...prev, challenge]);
 
     try {
-      const archRaw = localStorage.getItem('archivedChallenges');
-      let archArr: any[] = [];
-      if (archRaw) {
-        archArr = JSON.parse(archRaw) || [];
+      await restoreChallengeRow(challenge.challengeId);
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[restoreChallenge] failed, rolling back', e);
       }
-      const idx = archArr.findIndex((c) => c.challengeId === challenge.challengeId);
-      if (idx !== -1) {
-        archArr.splice(idx, 1);
-        localStorage.setItem('archivedChallenges', JSON.stringify(archArr));
-      }
-    } catch {}
-
-    try {
-      const activeRaw = localStorage.getItem('activeChallenges');
-      let actArr: any[] = [];
-      if (activeRaw) actArr = JSON.parse(activeRaw) || [];
-      actArr.push(challenge);
-      localStorage.setItem('activeChallenges', JSON.stringify(actArr));
-    } catch {}
+      setActiveChallenges((prev) =>
+        prev.filter((c) => c.challengeId !== challenge.challengeId),
+      );
+      setArchivedChallenges((prev) => [challenge, ...prev]);
+    }
   };
 
 
 
 
 
-  if (isLoading) {
+  if (isLoading || authStatus === 'loading') {
     return (
       <div className="min-h-screen bg-canvas">
         <div className="mx-auto max-w-[430px] px-4 pt-6 pb-24">
           <h1 className="text-3xl font-bold text-neutral-900">Challenges</h1>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'anonymous') {
+    return (
+      <div className="min-h-screen bg-canvas">
+        <div className="mx-auto max-w-[430px] px-4 pt-6 pb-24">
+          <SectionHeader
+            title="Challenges"
+            subtitle="Your active projects live here. Keep going — small progress still counts."
+          />
+          <div className="mt-6">
+            <AuthRequiredPrompt
+              title="Log in to see your challenges."
+              description="Challenges, daily habits, and your progress are saved to your account."
+            />
+          </div>
         </div>
       </div>
     );
@@ -622,33 +502,26 @@ export default function ChallengesPage() {
             </div>
           )}
 
-          {/* Check-in input */}
+          {/* Check-in input — auth is guaranteed here because the page-level
+              guard already redirects 'loading'/'anonymous' states. */}
           <div className="mt-5">
-            {authStatus === 'loading' ? (
-              <div className="h-24 rounded-lg bg-[var(--color-bg-soft)] animate-pulse" />
-            ) : authStatus === 'anonymous' ? (
-              <AuthRequiredPrompt
-                title="Create an account to post an update."
-                description="Your update will be shown with your maker name and avatar."
+            <>
+              <label className="block text-sm font-semibold text-[var(--color-text-primary)]">
+                How did it go today?
+              </label>
+              <textarea
+                value={checkInMessages[challenge.challengeId] || ''}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  if (text.length <= 200) {
+                    setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: text }));
+                  }
+                }}
+                disabled={completedToday}
+                placeholder="Share a quick update… (optional)"
+                className="mt-2 w-full rounded-lg border border-[var(--color-border-subtle)] bg-white p-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)] disabled:bg-[var(--color-bg-soft)] disabled:text-[var(--color-text-muted)]"
+                rows={3}
               />
-            ) : (
-              <>
-                <label className="block text-sm font-semibold text-[var(--color-text-primary)]">
-                  How did it go today?
-                </label>
-                <textarea
-                  value={checkInMessages[challenge.challengeId] || ''}
-                  onChange={(e) => {
-                    const text = e.target.value;
-                    if (text.length <= 200) {
-                      setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: text }));
-                    }
-                  }}
-                  disabled={completedToday}
-                  placeholder="Share a quick update… (optional)"
-                  className="mt-2 w-full rounded-lg border border-[var(--color-border-subtle)] bg-white p-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-primary)] disabled:bg-[var(--color-bg-soft)] disabled:text-[var(--color-text-muted)]"
-                  rows={3}
-                />
                 <div className="mt-1.5 flex items-center justify-between">
                   <span className="text-xs text-[var(--color-text-muted)]">
                     {(checkInMessages[challenge.challengeId] || '').length}/200
@@ -693,18 +566,17 @@ export default function ChallengesPage() {
                 {checkInImageErrors[challenge.challengeId] && (
                   <p className="mt-1 text-xs text-[var(--color-danger)]">{checkInImageErrors[challenge.challengeId]}</p>
                 )}
-                <div className="mt-3">
-                  <Button
-                    variant="primary"
-                    onClick={() => handleCheckInSubmit(challenge)}
-                    disabled={completedToday}
-                    className="w-full"
-                  >
-                    {completedToday ? 'Already completed today' : 'Complete Today'}
-                  </Button>
-                </div>
-              </>
-            )}
+              <div className="mt-3">
+                <Button
+                  variant="primary"
+                  onClick={() => handleCheckInSubmit(challenge)}
+                  disabled={completedToday}
+                  className="w-full"
+                >
+                  {completedToday ? 'Already completed today' : 'Complete Today'}
+                </Button>
+              </div>
+            </>
           </div>
 
           {/* Community check-ins */}
@@ -889,53 +761,55 @@ export default function ChallengesPage() {
     showFeedback('public_checkin_created');
   };
 
-  const handleHabitStatus = (status: 'done' | 'missed') => {
+  const handleHabitStatus = async (status: 'done' | 'missed') => {
     if (!activeHabit || todayHabitLog) return;
 
-    const newLog: HabitLog = {
-      id: generateId(),
-      habitId: activeHabit.habitId,
-      date: today,
-      status,
-    };
+    // Detect bounce-back BEFORE we add today's log so the check looks at
+    // the previous most recent log.
+    const prevLog = habitLogs
+      .filter((log) => log.habitId === activeHabit.habitId)
+      .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const bounceBack = prevLog?.status === 'missed';
 
-    // persist to habitLogs
-    const allLogs = [...habitLogs, newLog];
     try {
-      localStorage.setItem('habitLogs', JSON.stringify(allLogs));
-    } catch {}
+      const saved = await upsertHabitLog({
+        habitId: activeHabit.habitId,
+        date: today,
+        status,
+      });
+      setHabitLogs((prev) => [...prev, saved]);
 
-    setHabitLogs(allLogs);
-
-    // Show micro-feedback with smart achievement detection
-    if (status === 'done') {
-      const streak = getCurrentHabitStreak();
-      // Detect bounce-back: most recent prior log for this habit was missed.
-      // Read from pre-save habitLogs state (today's log not yet in React state).
-      const prevLog = habitLogs
-        .filter((log) => log.habitId === activeHabit.habitId)
-        .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-      const bounceBack = prevLog?.status === 'missed';
-      showFeedback('habit_done', { streak, bounceBack });
-    } else {
-      showFeedback('habit_missed');
+      if (status === 'done') {
+        const streak = await getCurrentHabitStreak();
+        showFeedback('habit_done', { streak, bounceBack });
+      } else {
+        showFeedback('habit_missed');
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[handleHabitStatus] failed', e);
+      }
     }
   };
 
-  const clearHabit = () => {
+  const clearHabit = async () => {
     if (!activeHabit) return;
     if (!window.confirm('Remove active habit?')) return;
-    localStorage.removeItem('activeHabit');
-    
-    // also remove all logs for this habit from habitLogs
-    try {
-      const remaining = habitLogs.filter(log => log.habitId !== activeHabit.habitId);
-      localStorage.setItem('habitLogs', JSON.stringify(remaining));
-    } catch {}
-    
+
+    const habitIdToRemove = activeHabit.habitId;
+
+    // Optimistic UI: clear immediately.
     setActiveHabit(null);
-    setHabitLogs((prev) => prev.filter(log => log.habitId !== activeHabit.habitId));
+    setHabitLogs((prev) => prev.filter((log) => log.habitId !== habitIdToRemove));
     dismissFeedback();
+
+    try {
+      await archiveHabit(habitIdToRemove);
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[clearHabit] failed', e);
+      }
+    }
   };
 
   return (

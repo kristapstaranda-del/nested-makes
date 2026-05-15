@@ -7,6 +7,10 @@ import { projects } from '../../data/projects';
 import { getUserProjects, deleteUserProject, cacheUserProjectLocally, removeUserProjectFromCache, getProjectCoverImage, type UserProject } from '@/lib/userProjects';
 import { getSupabaseUserProject, deleteSupabaseUserProject, isUuid } from '@/lib/supabase/userProjects';
 import { supabase } from '@/lib/supabase/client';
+import {
+  archiveChallenge as archiveChallengeRow,
+  getActiveChallenges,
+} from '@/lib/supabase/challenges';
 import { getFinishedMakesForProject, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { getCommentsForMake } from '@/lib/finishedMakeComments';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
@@ -48,7 +52,10 @@ export default function ProjectPage() {
 
   const staticProject = projects.find((p) => String(p.id) === id);
 
-  // ── Active challenge detection (lazy, synchronous, no flicker) ─────────────
+  // ── Active challenge detection ─────────────────────────────────────────────
+  // First render uses the legacy localStorage mirror written by /challenges so
+  // we avoid an empty flash. Then we refresh from Supabase to get the canonical
+  // value.
   const [activeChallenge, setActiveChallenge] = useState<{
     challengeId: string;
     plan: { type: 'time_daily' | 'rows_daily' | 'days_per_week'; target: number } | null;
@@ -66,6 +73,27 @@ export default function ProjectPage() {
       return null;
     }
   });
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    getActiveChallenges()
+      .then((rows) => {
+        if (cancelled) return;
+        const found = rows.find((c) => String(c.projectId) === String(id));
+        setActiveChallenge(
+          found ? { challengeId: found.challengeId, plan: found.plan } : null,
+        );
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ProjectPage] active challenge lookup failed', err);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   // Derived boolean — keeps existing chip/backLink JSX untouched
   const isActive = activeChallenge !== null;
@@ -209,28 +237,16 @@ export default function ProjectPage() {
     setCheckInJustSaved(true);
   }
 
-  function handleArchive() {
+  async function handleArchive() {
     if (!activeChallenge) return;
     if (!window.confirm('Are you sure you want to archive this challenge?')) return;
-    const { challengeId } = activeChallenge;
     try {
-      const activeRaw = localStorage.getItem('activeChallenges');
-      let activeArr: any[] = [];
-      if (activeRaw) { try { activeArr = JSON.parse(activeRaw); } catch {} }
-      const idx = activeArr.findIndex((c) => c.challengeId === challengeId);
-      let removed: any = null;
-      if (idx !== -1) {
-        removed = activeArr.splice(idx, 1)[0];
-        localStorage.setItem('activeChallenges', JSON.stringify(activeArr));
+      await archiveChallengeRow(activeChallenge.challengeId);
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[handleArchive] failed', e);
       }
-      if (removed) {
-        const archRaw = localStorage.getItem('archivedChallenges');
-        let archived: any[] = [];
-        if (archRaw) { try { archived = JSON.parse(archRaw); } catch {} }
-        archived.push(removed);
-        localStorage.setItem('archivedChallenges', JSON.stringify(archived));
-      }
-    } catch {}
+    }
     router.push('/challenges');
   }
 
@@ -441,16 +457,13 @@ export default function ProjectPage() {
   // ── User-created project ───────────────────────────────────────────────────
   async function handleDelete() {
     try {
-      const raw = localStorage.getItem('activeChallenges');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr) && arr.some((c) => c.projectId === id)) {
-          alert(`"${userProject?.title}" is part of an active challenge and can't be deleted right now. End the challenge first, then come back to delete it.`);
-          return;
-        }
+      const activeRows = await getActiveChallenges();
+      if (activeRows.some((c) => c.projectId === id)) {
+        alert(`"${userProject?.title}" is part of an active challenge and can't be deleted right now. End the challenge first, then come back to delete it.`);
+        return;
       }
     } catch {
-      // If we can't read challenges, allow deletion to proceed safely
+      // If we can't reach the DB, allow deletion to proceed safely
     }
     if (!window.confirm(`Delete "${userProject?.title}"? This can't be undone.`)) return;
 

@@ -7,79 +7,109 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import { projects } from '@/app/data/projects';
 import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import {
+  createChallenge,
+  getChallenge,
+  updateChallengePlan,
+  type ChallengePlanType,
+} from '@/lib/supabase/challenges';
+import { useAuthStatus } from '@/hooks/useAuthStatus';
+import AuthRequiredPrompt from '@/components/auth/AuthRequiredPrompt';
 
-interface ChallengePlan {
-  projectId: string;
-  plan: {
-    type: 'time_daily' | 'rows_daily' | 'days_per_week';
-    target: number;
-  };
-}
-
-type TrackingType = 'time_daily' | 'rows_daily' | 'days_per_week';
+type TrackingType = ChallengePlanType;
 
 function ChallengeSetupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
   const challengeId = searchParams.get('challengeId');
+  const { status: authStatus } = useAuthStatus();
 
   const [project, setProject] = useState<DiscoverProject | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [step, setStep] = useState(1);
   const [trackingType, setTrackingType] = useState<TrackingType | null>(null);
   const [target, setTarget] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
-  // helper to generate a unique ID for new challenges
-  const generateId = (): string => {
-    if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
-      return window.crypto.randomUUID();
-    }
-    return Date.now().toString();
-  };
-
+  // Resolve project metadata (static curated first, then user-created).
   useEffect(() => {
-    if (projectId) {
-      // Check static curated projects first, then fall back to user-created projects
-      const staticFound = projects.find((p) => String(p.id) === String(projectId));
-      if (staticFound) {
-        setProject(staticFound as DiscoverProject);
-      } else {
-        const userFound = getUserProjects().find((p) => p.id === projectId);
-        if (userFound) {
-          setProject(normalizeUserProject(userFound));
-        }
+    if (!projectId) {
+      setIsLoading(false);
+      return;
+    }
+    const staticFound = projects.find((p) => String(p.id) === String(projectId));
+    if (staticFound) {
+      setProject(staticFound as DiscoverProject);
+    } else {
+      const userFound = getUserProjects().find((p) => p.id === projectId);
+      if (userFound) {
+        setProject(normalizeUserProject(userFound));
       }
     }
+  }, [projectId]);
 
-    // if editing an existing challenge, prefill plan values
-    if (challengeId) {
-      const existing = localStorage.getItem('activeChallenges');
-      if (existing) {
-        try {
-          const arr = JSON.parse(existing);
-          if (Array.isArray(arr)) {
-            const match = arr.find((c) => c.challengeId === challengeId);
-            if (match && match.plan) {
-              setTrackingType(match.plan.type);
-              setTarget(String(match.plan.target));
-              setStep(2);
-            }
-          }
-        } catch (e) {
-          // ignore parse errors
-        }
-      }
+  // If editing an existing challenge, prefill plan from Supabase.
+  // Wait until auth is resolved — RLS requires a session.
+  useEffect(() => {
+    if (authStatus === 'loading') return;
+
+    if (!challengeId) {
+      setIsLoading(false);
+      return;
     }
 
-    setIsLoading(false);
-  }, [projectId, challengeId]);
+    if (authStatus === 'anonymous') {
+      setIsLoading(false);
+      return;
+    }
 
-  if (isLoading) {
+    let cancelled = false;
+    (async () => {
+      try {
+        const existing = await getChallenge(challengeId);
+        if (cancelled) return;
+        if (existing && existing.plan) {
+          setTrackingType(existing.plan.type);
+          setTarget(String(existing.plan.target));
+          setStep(2);
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ChallengeSetup] prefill failed', e);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [challengeId, authStatus]);
+
+  if (isLoading || authStatus === 'loading') {
     return (
       <div className="min-h-screen bg-neutral-50">
         <div className="mx-auto max-w-[430px] px-4 pt-6 pb-24">
           <h1 className="text-3xl font-bold text-neutral-900">Setup Challenge</h1>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'anonymous') {
+    return (
+      <div className="min-h-screen bg-neutral-50">
+        <div className="mx-auto max-w-[430px] px-4 pt-6 pb-24">
+          <h1 className="text-3xl font-bold text-neutral-900">Setup Challenge</h1>
+          <div className="mt-6">
+            <AuthRequiredPrompt
+              title="Log in to start a challenge."
+              description="Challenges are saved to your account so you can pick up from any device."
+            />
+          </div>
         </div>
       </div>
     );
@@ -127,82 +157,37 @@ function ChallengeSetupContent() {
     }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!trackingType || !target) return;
-
     const targetNum = parseInt(target, 10);
     const config = getInputConfig(trackingType);
     if (!config || targetNum < config.min || targetNum > config.max) return;
+    if (!project) return;
 
-    const today = new Date().toISOString().split('T')[0];
-
-    const existing = localStorage.getItem('activeChallenges');
-    let arr: any[] = [];
-    if (existing) {
-      try {
-        const parsed = JSON.parse(existing);
-        if (Array.isArray(parsed)) {
-          arr = parsed;
-        }
-      } catch (e) {
-        arr = [];
-      }
-    }
-
-    if (challengeId) {
-      // edit mode: update existing plan
-      const idx = arr.findIndex((c) => c.challengeId === challengeId);
-      if (idx !== -1) {
-        arr[idx] = {
-          ...arr[idx],
-          plan: {
-            type: trackingType,
-            target: targetNum,
-          },
-        };
-      } else {
-        // if not found for some reason, fall back to appending new
-        arr.push({
-          challengeId: generateId(),
-          projectId: project!.id,
-          plan: {
-            type: trackingType,
-            target: targetNum,
-          },
-          createdAt: today,
-        });
-      }
-      try {
-        localStorage.setItem('__showChallengeUpdatedFeedback', 'true');
-      } catch (e) {
-        // ignore storage errors
-      }
-    } else {
-      // create mode: append new challenge
-      arr.push({
-        challengeId: generateId(),
-        projectId: project!.id,
-        plan: {
-          type: trackingType,
-          target: targetNum,
-        },
-        createdAt: today,
-      });
-      // Flag for challenges page to show feedback
-      try {
-        localStorage.setItem('__showChallengeJoinedFeedback', 'true');
-      } catch (e) {
-        // ignore storage errors
-      }
-    }
-
+    setIsSaving(true);
+    setSaveError('');
     try {
-      localStorage.setItem('activeChallenges', JSON.stringify(arr));
+      if (challengeId) {
+        await updateChallengePlan(challengeId, { type: trackingType, target: targetNum });
+        try {
+          localStorage.setItem('__showChallengeUpdatedFeedback', 'true');
+        } catch {}
+      } else {
+        await createChallenge({
+          projectId: String(project.id),
+          plan: { type: trackingType, target: targetNum },
+        });
+        try {
+          localStorage.setItem('__showChallengeJoinedFeedback', 'true');
+        } catch {}
+      }
+      router.push('/challenges');
     } catch (e) {
-      // ignore storage errors
+      setSaveError(
+        e instanceof Error ? e.message : 'Could not save challenge. Please try again.',
+      );
+      setIsSaving(false);
     }
-
-    router.push('/challenges');
   };
 
   const config = getInputConfig(trackingType);
@@ -275,20 +260,25 @@ function ChallengeSetupContent() {
             Min: {config?.min}, Max: {config?.max}
           </p>
 
+          {saveError && (
+            <p className="mt-2 text-sm text-[var(--color-danger)]">{saveError}</p>
+          )}
+
           <div className="mt-6 flex gap-3">
             <Button
               variant="secondary"
               className="flex-1"
               onClick={() => setStep(1)}
+              disabled={isSaving}
             >
               Back
             </Button>
             <Button
               className="flex-1"
               onClick={handleConfirm}
-              disabled={!isTargetValid}
+              disabled={!isTargetValid || isSaving}
             >
-              Confirm Plan
+              {isSaving ? 'Saving…' : 'Confirm Plan'}
             </Button>
           </div>
         </Card>

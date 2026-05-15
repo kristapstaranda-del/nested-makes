@@ -25,6 +25,17 @@ import { getSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from 
 import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { projects as staticProjects } from '@/app/data/projects';
+import {
+  getActiveChallenges,
+  getArchivedChallenges,
+  type ActiveChallenge,
+} from '@/lib/supabase/challenges';
+import {
+  getActiveHabit,
+  getAllHabitLogs,
+  type ActiveHabit,
+  type HabitLog,
+} from '@/lib/supabase/habits';
 
 interface CheckIn {
   id: string;
@@ -35,13 +46,6 @@ interface CheckIn {
   message: string;
   displayName: string;
   imageUrl?: string;
-}
-
-interface ActiveChallenge {
-  challengeId: string;
-  projectId: string;
-  plan: any;
-  createdAt: string;
 }
 
 function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): ProfileData {
@@ -69,71 +73,84 @@ export default function ProfilePage() {
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
   const [archivedChallenges, setArchivedChallenges] = useState<ActiveChallenge[]>([]);
   const [publicCheckIns, setPublicCheckIns] = useState<CheckIn[]>([]);
-  const [activeHabit, setActiveHabit] = useState<any>(null);
-  const [habitLogs, setHabitLogs] = useState<any[]>([]);
+  const [activeHabit, setActiveHabit] = useState<ActiveHabit | null>(null);
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
   const [userProjects, setUserProjects] = useState<UserProject[]>([]);
   const [myMakes, setMyMakes] = useState<FinishedMake[]>([]);
 
+  // Habit stats — async, loaded after Supabase resolves.
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [last7DaysCount, setLast7DaysCount] = useState(0);
+  const [last7DaysRate, setLast7DaysRate] = useState(0);
+
+  // Synchronous bootstrap: localStorage-backed pieces only.
   useEffect(() => {
-    // Load profile data first
     const profileData = getProfileData();
     setProfile(profileData);
 
-    // Load active challenges
-    try {
-      const activeRaw = localStorage.getItem('activeChallenges');
-      if (activeRaw) {
-        const parsed = JSON.parse(activeRaw);
-        if (Array.isArray(parsed)) {
-          setActiveChallenges(parsed);
-        }
-      }
-    } catch {}
-
-    // Load archived challenges
-    try {
-      const archivedRaw = localStorage.getItem('archivedChallenges');
-      if (archivedRaw) {
-        const parsed = JSON.parse(archivedRaw);
-        if (Array.isArray(parsed)) {
-          setArchivedChallenges(parsed);
-        }
-      }
-    } catch {}
-
-    // Load public check-ins — authorId resolved via backfill
+    // Public check-ins still live in localStorage during Phase 2.1.
     setPublicCheckIns(getPublicCheckIns());
 
-    // Load active habit
-    try {
-      const habitRaw = localStorage.getItem('activeHabit');
-      if (habitRaw) {
-        const parsed = JSON.parse(habitRaw);
-        if (parsed && typeof parsed.habitId === 'string') {
-          setActiveHabit(parsed);
-        }
-      }
-    } catch {}
-
-    // Load habit logs
-    try {
-      const logsRaw = localStorage.getItem('habitLogs');
-      if (logsRaw) {
-        const parsed = JSON.parse(logsRaw);
-        if (Array.isArray(parsed)) {
-          setHabitLogs(parsed);
-        }
-      }
-    } catch {}
-
-    // Load user-created projects
     setUserProjects(getUserProjects());
 
-    // Load this user's finished makes
     const userId = getOrCreateUserId();
     setMyMakes(getFinishedMakesByAuthor(userId));
 
     setIsLoading(false);
+  }, []);
+
+  // Supabase data: challenges, habit, habit logs, derived stats.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (!data.user) return; // anonymous → leave empty
+
+        const [active, archived, habit, logs, cs, bs, l7c, l7r] = await Promise.all([
+          getActiveChallenges(),
+          getArchivedChallenges(),
+          getActiveHabit(),
+          getAllHabitLogs(),
+          getCurrentHabitStreak(),
+          getBestHabitStreak(),
+          getLast7DaysCompletionCount(),
+          getLast7DaysCompletionRate(),
+        ]);
+        if (cancelled) return;
+        setActiveChallenges(active);
+        setArchivedChallenges(archived);
+        setActiveHabit(habit);
+        setHabitLogs(logs);
+        setCurrentStreak(cs);
+        setBestStreak(bs);
+        setLast7DaysCount(l7c);
+        setLast7DaysRate(l7r);
+
+        // Mirror to legacy localStorage keys for the achievements module.
+        // Phase 2.4 removes this once achievements are migrated.
+        try {
+          localStorage.setItem('activeChallenges', JSON.stringify(active));
+          localStorage.setItem('archivedChallenges', JSON.stringify(archived));
+          localStorage.setItem('habitLogs', JSON.stringify(logs));
+          if (habit) {
+            localStorage.setItem('activeHabit', JSON.stringify(habit));
+          } else {
+            localStorage.removeItem('activeHabit');
+          }
+        } catch {}
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ProfilePage] Supabase load failed', e);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -200,14 +217,11 @@ export default function ProfilePage() {
 
   if (!profile) return null;
 
-  // Compute stats
+  // Compute stats (challenge/check-in counts are derived from state; habit
+  // stats come from Supabase via the async effect below).
   const activeChallengesCount = activeChallenges.length;
   const archivedChallengesCount = archivedChallenges.length;
   const totalCheckInsCount = publicCheckIns.length;
-  const currentStreak = getCurrentHabitStreak();
-  const bestStreak = getBestHabitStreak();
-  const last7DaysCount = getLast7DaysCompletionCount();
-  const last7DaysRate = getLast7DaysCompletionRate();
 
   // Activity data
   const hasActiveHabit = !!activeHabit;

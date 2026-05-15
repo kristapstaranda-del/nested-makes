@@ -1,58 +1,28 @@
 /**
- * challengeArchive.ts
+ * lib/challengeArchive.ts
  *
- * Pure localStorage utility for archiving a challenge after a finished-make submission.
- * No React, no confirm dialog, no feedback calls — those are the caller's responsibility.
+ * Phase 2.1 — Thin re-export around the Supabase challenges helper. Kept as a
+ * separate module so call sites (`app/makes/new/page.tsx`) don't need to change.
  *
- * Idempotent: safe to call even if the challenge is already archived or not found.
+ * The helper is idempotent and silent on failure: it must not break the main
+ * finished-make submission flow if archiving fails.
  */
 
+import { archiveChallengeAfterFinish as archiveImpl } from '@/lib/supabase/challenges';
+
 /**
- * Moves a challenge from activeChallenges → archivedChallenges.
+ * Moves a challenge from active → archived after a finished-make submission.
  * Looks up by challengeId first; falls back to projectId if challengeId is absent.
- * Does nothing if the challenge is not found in active, or is already in archived.
+ *
+ * Errors are swallowed; in development they are console.warn-ed for debugging.
  */
 export function archiveChallengeAfterFinish(opts: {
   challengeId?: string;
   projectId?: string;
 }): void {
-  if (typeof window === 'undefined') return;
-  const { challengeId, projectId } = opts;
-  if (!challengeId && !projectId) return;
-
-  try {
-    // ── Read active challenges ────────────────────────────────────────────────
-    const activeRaw = localStorage.getItem('activeChallenges');
-    if (!activeRaw) return;
-    const active: any[] = JSON.parse(activeRaw) || [];
-    if (!Array.isArray(active)) return;
-
-    // Find the challenge
-    const idx = active.findIndex((c) =>
-      challengeId
-        ? c.challengeId === challengeId
-        : c.projectId === projectId
-    );
-    if (idx === -1) return; // not in active, nothing to do
-
-    const [removed] = active.splice(idx, 1);
-    localStorage.setItem('activeChallenges', JSON.stringify(active));
-
-    // ── Move to archivedChallenges (duplicate-safe) ──────────────────────────
-    const archivedRaw = localStorage.getItem('archivedChallenges');
-    const archived: any[] = archivedRaw
-      ? (JSON.parse(archivedRaw) || [])
-      : [];
-
-    const alreadyArchived =
-      Array.isArray(archived) &&
-      archived.some((c) => c.challengeId === removed.challengeId);
-
-    if (!alreadyArchived) {
-      archived.push(removed);
-      localStorage.setItem('archivedChallenges', JSON.stringify(archived));
+  archiveImpl(opts).catch((err) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[archiveChallengeAfterFinish] failed silently', err);
     }
-  } catch {
-    // Silent — localStorage errors must not break the main submission flow
-  }
+  });
 }

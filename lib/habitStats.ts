@@ -1,136 +1,102 @@
-interface HabitLog {
-  id: string;
+/**
+ * lib/habitStats.ts
+ *
+ * Phase 2.1 — Habit statistics backed by Supabase.
+ *
+ * All helpers are now async. They operate on the current user's active habit
+ * (one per user, enforced by the DB partial unique index). Returns 0 when
+ * there is no session or no active habit, so call sites don't need to special-
+ * case the anonymous state.
+ */
+
+import {
+  getActiveHabit,
+  getHabitLogs,
+  type HabitLog,
+} from '@/lib/supabase/habits';
+
+async function loadHabitContext(): Promise<{
   habitId: string;
-  date: string; // YYYY-MM-DD
-  status: 'done' | 'missed';
+  logs: HabitLog[];
+} | null> {
+  const habit = await getActiveHabit();
+  if (!habit) return null;
+
+  const logs = await getHabitLogs(habit.habitId);
+  return { habitId: habit.habitId, logs };
 }
 
-function getHabitLogs(): HabitLog[] {
-  if (typeof window === 'undefined') return [];
+/**
+ * Current consecutive-done streak ending today (or most recent day).
+ * Walks logs newest-first, counting 'done' until a 'missed' breaks the chain.
+ */
+export async function getCurrentHabitStreak(): Promise<number> {
+  const ctx = await loadHabitContext();
+  if (!ctx) return 0;
 
-  try {
-    const stored = localStorage.getItem('habitLogs');
-    if (!stored) return [];
-
-    const parsed = JSON.parse(stored);
-    if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (log) =>
-          typeof log === 'object' &&
-          log !== null &&
-          typeof log.id === 'string' &&
-          typeof log.habitId === 'string' &&
-          typeof log.date === 'string' &&
-          (log.status === 'done' || log.status === 'missed')
-      ) as HabitLog[];
-    }
-  } catch (error) {
-    // Ignore malformed data
-  }
-
-  return [];
-}
-
-function getActiveHabitId(): string | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const stored = localStorage.getItem('activeHabit');
-    if (!stored) return null;
-
-    const parsed = JSON.parse(stored);
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof parsed.habitId === 'string'
-    ) {
-      return parsed.habitId;
-    }
-  } catch (error) {
-    // Ignore malformed data
-  }
-
-  return null;
-}
-
-export function getCurrentHabitStreak(): number {
-  const habitId = getActiveHabitId();
-  if (!habitId) return 0;
-
-  const logs = getHabitLogs()
-    .filter((log) => log.habitId === habitId)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const sorted = [...ctx.logs].sort((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
+  );
 
   let streak = 0;
-  const today = new Date().toISOString().split('T')[0];
-
-  for (const log of logs) {
+  for (const log of sorted) {
     if (log.status === 'done') {
       streak++;
     } else if (log.status === 'missed') {
       break;
     }
   }
-
   return streak;
 }
 
-export function getBestHabitStreak(): number {
-  const habitId = getActiveHabitId();
-  if (!habitId) return 0;
+/**
+ * Longest consecutive 'done' streak ever recorded for the active habit.
+ */
+export async function getBestHabitStreak(): Promise<number> {
+  const ctx = await loadHabitContext();
+  if (!ctx) return 0;
 
-  const logs = getHabitLogs()
-    .filter((log) => log.habitId === habitId)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const sorted = [...ctx.logs].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
+  );
 
-  let currentStreak = 0;
-  let bestStreak = 0;
-
-  for (const log of logs) {
+  let current = 0;
+  let best = 0;
+  for (const log of sorted) {
     if (log.status === 'done') {
-      currentStreak++;
-      bestStreak = Math.max(bestStreak, currentStreak);
+      current++;
+      if (current > best) best = current;
     } else if (log.status === 'missed') {
-      currentStreak = 0;
+      current = 0;
     }
   }
-
-  return bestStreak;
+  return best;
 }
 
-export function getLast7DaysCompletionCount(): number {
-  const habitId = getActiveHabitId();
-  if (!habitId) return 0;
+/**
+ * Count of 'done' logs in the trailing 7 days (inclusive of today).
+ */
+export async function getLast7DaysCompletionCount(): Promise<number> {
+  const ctx = await loadHabitContext();
+  if (!ctx) return 0;
 
   const today = new Date();
   const sevenDaysAgo = new Date(today);
   sevenDaysAgo.setDate(today.getDate() - 7);
 
-  return getHabitLogs()
-    .filter((log) => log.habitId === habitId && log.status === 'done')
-    .filter((log) => {
-      const logDate = new Date(log.date);
-      return logDate >= sevenDaysAgo && logDate <= today;
-    }).length;
+  return ctx.logs.filter((log) => {
+    if (log.status !== 'done') return false;
+    const d = new Date(log.date);
+    return d >= sevenDaysAgo && d <= today;
+  }).length;
 }
 
-export function getLast7DaysCompletionRate(): number {
-  const habitId = getActiveHabitId();
-  if (!habitId) return 0;
-
-  const today = new Date();
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 7);
-
-  const relevantLogs = getHabitLogs()
-    .filter((log) => log.habitId === habitId)
-    .filter((log) => {
-      const logDate = new Date(log.date);
-      return logDate >= sevenDaysAgo && logDate <= today;
-    });
-
-  const totalDays = 7;
-  const completedDays = relevantLogs.filter((log) => log.status === 'done').length;
-
-  return totalDays > 0 ? Math.round((completedDays / totalDays) * 100) : 0;
+/**
+ * Percentage (0-100) of done days in the trailing 7 days.
+ * Denominator is always 7, not "days with any log", so missing days count
+ * against the rate — matches the existing UI behavior.
+ */
+export async function getLast7DaysCompletionRate(): Promise<number> {
+  const completed = await getLast7DaysCompletionCount();
+  return Math.round((completed / 7) * 100);
 }

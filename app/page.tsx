@@ -12,12 +12,7 @@ import { getProfileData } from '@/lib/profile';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
 import { getPublicCheckIns } from '@/lib/authorResolution';
 import { getOrCreateUserId } from '@/lib/communityProfiles';
-
-interface ActiveChallenge {
-  challengeId: string;
-  projectId: string;
-  createdAt: string;
-}
+import { getActiveChallenges, type ActiveChallenge } from '@/lib/supabase/challenges';
 
 type AuthState = 'loading' | 'logged-out' | 'logged-in';
 
@@ -69,27 +64,20 @@ export default function TodayPage() {
     }).catch(() => {});
   }, [authState, user]);
 
-  // Load localStorage data once auth is confirmed
+  // Load Supabase + localStorage data once auth is confirmed
   useEffect(() => {
     if (authState !== 'logged-in') return;
 
-    try {
-      const raw = localStorage.getItem('activeChallenges');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setActiveChallenges(
-            parsed.filter(
-              (c): c is ActiveChallenge =>
-                c !== null &&
-                typeof c === 'object' &&
-                typeof c.challengeId === 'string' &&
-                typeof c.projectId === 'string',
-            ),
-          );
+    let cancelled = false;
+    getActiveChallenges()
+      .then((rows) => {
+        if (!cancelled) setActiveChallenges(rows);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[TodayPage] getActiveChallenges failed', err);
         }
-      }
-    } catch {}
+      });
 
     const profile = getProfileData();
     setProfileName(profile.nickname || '');
@@ -115,6 +103,10 @@ export default function TodayPage() {
         if (ci.challengeId) perChallenge[ci.challengeId] = (perChallenge[ci.challengeId] ?? 0) + 1;
       });
     setCheckInsPerChallenge(perChallenge);
+
+    return () => {
+      cancelled = true;
+    };
   }, [authState]);
 
   const handleLogout = async () => {
