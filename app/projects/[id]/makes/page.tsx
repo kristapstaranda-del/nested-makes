@@ -24,7 +24,8 @@ export default function ProjectMakesPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    // Resolve project title
+    if (!id) return;
+    // Resolve project title (sync from local data sources)
     const staticProj = staticProjects.find((p) => String(p.id) === id);
     if (staticProj) {
       setProjectTitle(staticProj.title);
@@ -33,8 +34,17 @@ export default function ProjectMakesPage() {
       if (userProj) setProjectTitle(userProj.title);
     }
 
-    // Load finished makes
-    setMakes(getFinishedMakesForProject(id));
+    let cancelled = false;
+    getFinishedMakesForProject(id)
+      .then((rows) => {
+        if (!cancelled) setMakes(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setMakes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   return (

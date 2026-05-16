@@ -6,10 +6,15 @@ import Link from 'next/link';
 import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects } from '@/lib/userProjects';
 import { validateImageFile, fileToDataUrl } from '@/lib/imageUtils';
-import { saveFinishedMake, type FinishedMakeImage } from '@/lib/finishedMakes';
+import { createFinishedMake } from '@/lib/supabase/finishedMakes';
 import { archiveChallengeAfterFinish } from '@/lib/challengeArchive';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
-import { getProfileData } from '@/lib/profile';
+
+// Local image shape used inside the form before upload.
+interface FinishedMakeImage {
+  id: string;
+  dataUrl: string;
+  isCover: boolean;
+}
 import Button from '@/components/ui/Button';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
@@ -91,7 +96,7 @@ function NewMakeForm() {
 
   // ── Submit ──────────────────────────────────────────────────────────────────
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (images.length === 0) {
       setSubmitError('Add at least one photo of your finished project.');
       return;
@@ -101,14 +106,11 @@ function NewMakeForm() {
 
     try {
       captureAchievementSnapshot();
-      const profile = getProfileData();
-      saveFinishedMake({
+      await createFinishedMake({
         projectId,
         challengeId,
-        authorId: getOrCreateUserId(),
-        displayName: profile.nickname || 'Maker',
         caption: caption.trim() || undefined,
-        images,
+        images: images.map((img) => ({ dataUrl: img.dataUrl, isCover: img.isCover })),
       });
 
       // Auto-archive the related challenge (idempotent, silent on failure)
@@ -117,8 +119,9 @@ function NewMakeForm() {
       // Show celebration in context, then redirect
       showFeedback('finished_make_submitted');
       setTimeout(() => router.push('/challenges'), 2500);
-    } catch {
-      setSubmitError('Something went wrong. Please try again.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Something went wrong. Please try again.';
+      setSubmitError(msg);
       setIsSubmitting(false);
     }
   };

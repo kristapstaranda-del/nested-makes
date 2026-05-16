@@ -16,7 +16,7 @@ import {
   hasCheckInForToday,
 } from '@/lib/supabase/checkIns';
 import { getFinishedMakesForProject, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
-import { getCommentsForMake } from '@/lib/finishedMakeComments';
+import { getCommentCountsForMakes } from '@/lib/supabase/finishedMakeComments';
 import { getProfileData } from '@/lib/profile';
 import StartChallengeButton from '@/components/StartChallengeButton';
 import Card from '@/components/ui/Card';
@@ -152,15 +152,30 @@ export default function ProjectPage() {
     load();
   }, [id, staticProject]);
 
-  // Load finished makes + comment counts for this project
+  // Load finished makes + comment counts for this project (Supabase).
   useEffect(() => {
-    const makes = getFinishedMakesForProject(id);
-    setFinishedMakes(makes);
-    const counts: Record<string, number> = {};
-    makes.forEach((m) => {
-      counts[m.id] = getCommentsForMake(m.id).length;
-    });
-    setMakeCommentCounts(counts);
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const makes = await getFinishedMakesForProject(id);
+        if (cancelled) return;
+        setFinishedMakes(makes);
+        if (makes.length === 0) {
+          setMakeCommentCounts({});
+          return;
+        }
+        const counts = await getCommentCountsForMakes(makes.map((m) => m.id));
+        if (!cancelled) setMakeCommentCounts(counts);
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[ProjectPage] finished makes load failed', e);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // Load displayName + today's check-in status when challenge is active

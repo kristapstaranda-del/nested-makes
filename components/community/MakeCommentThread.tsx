@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getCommentsForMake, saveComment, type FinishedMakeComment } from '@/lib/finishedMakeComments';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
+import {
+  createComment,
+  getCommentsForMake,
+  type FinishedMakeCommentWithAuthor,
+} from '@/lib/supabase/finishedMakeComments';
+import { supabase } from '@/lib/supabase/client';
 import { getProfileData } from '@/lib/profile';
 import AuthorLink from '@/components/community/AuthorLink';
-import { getFinishedMakes } from '@/lib/finishedMakes';
 import { addNotification } from '@/lib/notifications';
 
 const MAX_COMMENT_CHARS = 300;
@@ -16,41 +19,66 @@ interface MakeCommentThreadProps {
 }
 
 export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
-  const [comments, setComments] = useState<FinishedMakeComment[]>([]);
+  const [comments, setComments] = useState<FinishedMakeCommentWithAuthor[]>([]);
   const [draft, setDraft] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setComments(getCommentsForMake(makeId));
+    let cancelled = false;
+    getCommentsForMake(makeId)
+      .then((rows) => {
+        if (!cancelled) setComments(rows);
+      })
+      .catch(() => {
+        // Leave empty on error.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [makeId]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const msg = draft.trim();
-    if (!msg) return;
+    if (!msg || submitting) return;
+    setSubmitting(true);
+    try {
+      const newComment = await createComment({ makeId, message: msg });
+      setComments((prev) => [...prev, newComment]);
+      setDraft('');
+      setComposerOpen(false);
+      setShowAll(true);
 
-    const authorId = getOrCreateUserId();
-    const displayName = getProfileData().nickname || 'Maker';
-
-    const newComment = saveComment({ makeId, authorId, displayName, message: msg });
-    setComments((prev) => [...prev, newComment]);
-    setDraft('');
-    setComposerOpen(false);
-    // Keep the new comment visible if we were in collapsed state
-    setShowAll(true);
-
-    // Notify make owner
-    const make = getFinishedMakes().find((m) => m.id === makeId);
-    if (make?.authorId && make.authorId !== authorId) {
-      addNotification({
-        type: 'make_commented',
-        recipientId: make.authorId,
-        actorId: authorId,
-        actorName: displayName,
-        targetType: 'finished_make',
-        targetId: makeId,
-        targetContext: make.projectId,
-      });
+      // Notify make owner (best effort).
+      const { data: userData } = await supabase.auth.getUser();
+      const me = userData.user?.id;
+      if (me) {
+        const { data: row } = await supabase
+          .from('finished_makes')
+          .select('user_id, project_id')
+          .eq('id', makeId)
+          .maybeSingle();
+        const owner = (row as { user_id: string; project_id: string } | null) ?? null;
+        if (owner && owner.user_id !== me) {
+          const actorName = getProfileData().nickname || 'Maker';
+          addNotification({
+            type: 'make_commented',
+            recipientId: owner.user_id,
+            actorId: me,
+            actorName,
+            targetType: 'finished_make',
+            targetId: makeId,
+            targetContext: owner.project_id,
+          });
+        }
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[MakeCommentThread] submit failed', e);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -59,7 +87,6 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
 
   return (
     <div className="mt-3 pt-3 border-t border-[var(--color-border-subtle)]">
-
       {/* Comments list */}
       {comments.length > 0 ? (
         <div className="mb-3 space-y-3">
@@ -80,7 +107,6 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
             </div>
           ))}
 
-          {/* Show all / show less toggle */}
           {hasOverflow && (
             <button
               type="button"
@@ -116,10 +142,10 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || submitting}
               className="rounded-lg bg-[var(--color-brand-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 hover:bg-[var(--color-brand-primary-hover)] transition-colors"
             >
-              Post comment
+              {submitting ? 'Posting…' : 'Post comment'}
             </button>
             <button
               type="button"
@@ -142,7 +168,6 @@ export default function MakeCommentThread({ makeId }: MakeCommentThreadProps) {
           Leave a comment…
         </button>
       )}
-
     </div>
   );
 }

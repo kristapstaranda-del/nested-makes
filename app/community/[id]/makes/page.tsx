@@ -5,9 +5,12 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getPublicProfile, type PublicProfile } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
+import { getSupabaseProfile } from '@/lib/supabase/profiles';
 import { projects as staticProjects } from '@/app/data/projects';
 import Card from '@/components/ui/Card';
 import ImageLightbox from '@/components/ui/ImageLightbox';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getProjectTitle(projectId: string): string | null {
   return staticProjects.find((p) => String(p.id) === projectId)?.title ?? null;
@@ -22,9 +25,49 @@ export default function CommunityMakesPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    const found = getPublicProfile(id);
-    setProfile(found);
-    setMakes(getFinishedMakesByAuthor(id));
+    if (!id) {
+      setProfile(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      // Resolve profile: UUID → Supabase, otherwise mock fallback.
+      if (UUID_RE.test(id)) {
+        try {
+          const remote = await getSupabaseProfile(id);
+          if (cancelled) return;
+          if (!remote) {
+            setProfile(null);
+          } else {
+            setProfile({
+              id: remote.id,
+              displayName: remote.nickname || 'Maker',
+              about: remote.about ?? '',
+              craftInterests: remote.craft_interests ?? [],
+              avatarId: remote.avatar_id ?? undefined,
+              avatarColor: remote.avatar_color ?? undefined,
+              publicBadges: [],
+              recentCheckIns: [],
+              finishedProjects: [],
+            });
+          }
+        } catch {
+          if (!cancelled) setProfile(null);
+        }
+      } else {
+        setProfile(getPublicProfile(id));
+      }
+
+      try {
+        const rows = await getFinishedMakesByAuthor(id);
+        if (!cancelled) setMakes(rows);
+      } catch {
+        if (!cancelled) setMakes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (profile === 'loading') {

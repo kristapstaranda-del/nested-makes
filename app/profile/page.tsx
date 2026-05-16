@@ -21,7 +21,6 @@ import NotificationFeed from '@/components/notifications/NotificationFeed';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { getSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { projects as staticProjects } from '@/app/data/projects';
 import {
@@ -85,9 +84,6 @@ export default function ProfilePage() {
 
     setUserProjects(getUserProjects());
 
-    const userId = getOrCreateUserId();
-    setMyMakes(getFinishedMakesByAuthor(userId));
-
     setIsLoading(false);
   }, []);
 
@@ -100,17 +96,19 @@ export default function ProfilePage() {
         if (cancelled) return;
         if (!data.user) return; // anonymous → leave empty
 
-        const [active, archived, habit, logs, cs, bs, l7c, l7r, myCheckIns] = await Promise.all([
-          getActiveChallenges(),
-          getArchivedChallenges(),
-          getActiveHabit(),
-          getAllHabitLogs(),
-          getCurrentHabitStreak(),
-          getBestHabitStreak(),
-          getLast7DaysCompletionCount(),
-          getLast7DaysCompletionRate(),
-          getCheckInsForUser(data.user.id),
-        ]);
+        const [active, archived, habit, logs, cs, bs, l7c, l7r, myCheckIns, myMakesRows] =
+          await Promise.all([
+            getActiveChallenges(),
+            getArchivedChallenges(),
+            getActiveHabit(),
+            getAllHabitLogs(),
+            getCurrentHabitStreak(),
+            getBestHabitStreak(),
+            getLast7DaysCompletionCount(),
+            getLast7DaysCompletionRate(),
+            getCheckInsForUser(data.user.id),
+            getFinishedMakesByAuthor(data.user.id),
+          ]);
         if (cancelled) return;
         setActiveChallenges(active);
         setArchivedChallenges(archived);
@@ -121,6 +119,7 @@ export default function ProfilePage() {
         setLast7DaysCount(l7c);
         setLast7DaysRate(l7r);
         setPublicCheckIns(myCheckIns);
+        setMyMakes(myMakesRows);
 
         // Mirror current user's check-ins to legacy localStorage so the
         // achievements module sees them. Phase 2.4 removes this.

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getOrCreateUserId } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
+import { supabase } from '@/lib/supabase/client';
 import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects } from '@/lib/userProjects';
 import ImageLightbox from '@/components/ui/ImageLightbox';
@@ -21,9 +21,32 @@ export default function MyMakesPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    const userId = getOrCreateUserId();
-    setMakes(getFinishedMakesByAuthor(userId));
-    setLoaded(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!data.user) {
+          if (!cancelled) {
+            setMakes([]);
+            setLoaded(true);
+          }
+          return;
+        }
+        const rows = await getFinishedMakesByAuthor(data.user.id);
+        if (!cancelled) {
+          setMakes(rows);
+          setLoaded(true);
+        }
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[MyMakesPage] load failed', e);
+        }
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

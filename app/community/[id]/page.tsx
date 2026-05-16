@@ -51,8 +51,14 @@ export default function CommunityProfilePage() {
 
     let cancelled = false;
     (async () => {
-      // Finished makes still live in localStorage (Phase 2.3), so this is sync.
-      setFinishedMakes(getFinishedMakesByAuthor(id));
+      // Finished makes — async fetch from Supabase.
+      getFinishedMakesByAuthor(id)
+        .then((rows) => {
+          if (!cancelled) setFinishedMakes(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setFinishedMakes([]);
+        });
 
       // If id is a UUID, the profile lives in Supabase auth.users → profiles.
       if (UUID_RE.test(id)) {
