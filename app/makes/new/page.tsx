@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects } from '@/lib/userProjects';
+import { getSupabasePublicUserProject } from '@/lib/supabase/userProjects';
 import { validateImageFile, fileToDataUrl } from '@/lib/imageUtils';
 import { createFinishedMake } from '@/lib/supabase/finishedMakes';
 import { archiveChallengeAfterFinish } from '@/lib/challengeArchive';
@@ -43,13 +43,23 @@ function NewMakeForm() {
   const { currentFeedback, showFeedback, dismissFeedback, captureAchievementSnapshot } = useMicroFeedback();
   const { status: authStatus } = useAuthStatus();
 
-  // Resolve project title
+  // Resolve project title — local cache first, then Supabase fallback.
   useEffect(() => {
     if (!projectId) return;
-    const userProj = getUserProjects().find((p) => p.id === projectId);
-    if (userProj) { setProjectTitle(userProj.title); return; }
-    const staticProj = staticProjects.find((p) => String(p.id) === projectId);
-    if (staticProj) setProjectTitle(staticProj.title);
+    const local = getUserProjects().find((p) => p.id === projectId);
+    if (local) {
+      setProjectTitle(local.title);
+      return;
+    }
+    let cancelled = false;
+    getSupabasePublicUserProject(projectId)
+      .then((row) => {
+        if (!cancelled && row) setProjectTitle(row.title);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // ── Image handlers ──────────────────────────────────────────────────────────

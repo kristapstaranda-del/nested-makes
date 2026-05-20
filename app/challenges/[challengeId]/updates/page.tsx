@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects } from '@/lib/userProjects';
+import { getSupabasePublicUserProject } from '@/lib/supabase/userProjects';
 import { sanitizeCoverImage } from '@/lib/imageUtils';
 import ImageLightbox from '@/components/ui/ImageLightbox';
 import ReactionButton from '@/components/community/ReactionButton';
@@ -55,12 +55,12 @@ export default function ChallengeUpdatesPage() {
 
         const projectId = challenge?.projectId;
         if (projectId) {
-          const userProj = getUserProjects().find((p) => p.id === projectId);
-          if (userProj) {
-            setProjectTitle(userProj.title);
+          const local = getUserProjects().find((p) => p.id === projectId);
+          if (local) {
+            setProjectTitle(local.title);
           } else {
-            const staticProj = staticProjects.find((p) => String(p.id) === projectId);
-            if (staticProj) setProjectTitle(staticProj.title);
+            const remote = await getSupabasePublicUserProject(projectId);
+            if (!cancelled && remote) setProjectTitle(remote.title);
           }
         }
       } catch (e) {

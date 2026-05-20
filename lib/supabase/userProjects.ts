@@ -164,6 +164,41 @@ export async function getSupabaseUserProjects(userId: string): Promise<UserProje
   return (data as DbProjectRow[]).map(rowToUserProject);
 }
 
+/**
+ * Fetch every public project across all users — used by /discover after the
+ * static mock library was removed in Phase 2.4. RLS on user_projects allows
+ * `is_public = true` rows to be visible to any authenticated user.
+ */
+export async function getAllPublicUserProjects(): Promise<UserProject[]> {
+  const { data, error } = await supabase
+    .from('user_projects')
+    .select('*, project_images(*)')
+    .eq('is_public', true)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data as DbProjectRow[]).map(rowToUserProject);
+}
+
+/**
+ * Fetch a single project by id (any user, as long as it's public OR owned by
+ * the caller — RLS handles the visibility filter). Used by pages that need a
+ * project's title/category but don't know which user it belongs to.
+ */
+export async function getSupabasePublicUserProject(
+  id: string,
+): Promise<UserProject | null> {
+  const { data, error } = await supabase
+    .from('user_projects')
+    .select('*, project_images(*)')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  return rowToUserProject(data as DbProjectRow);
+}
+
 export async function getSupabaseUserProject(
   id: string,
   userId: string,

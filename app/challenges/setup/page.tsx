@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { projects } from '@/app/data/projects';
 import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { getSupabasePublicUserProject } from '@/lib/supabase/userProjects';
 import {
   createChallenge,
   getChallenge,
@@ -33,21 +33,29 @@ function ChallengeSetupContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
-  // Resolve project metadata (static curated first, then user-created).
+  // Resolve project metadata: try local cache first (fast first paint), then
+  // fall back to Supabase for projects authored by other users.
   useEffect(() => {
     if (!projectId) {
       setIsLoading(false);
       return;
     }
-    const staticFound = projects.find((p) => String(p.id) === String(projectId));
-    if (staticFound) {
-      setProject(staticFound as DiscoverProject);
-    } else {
-      const userFound = getUserProjects().find((p) => p.id === projectId);
-      if (userFound) {
-        setProject(normalizeUserProject(userFound));
-      }
+    const userFound = getUserProjects().find((p) => p.id === projectId);
+    if (userFound) {
+      setProject(normalizeUserProject(userFound));
+      return;
     }
+
+    let cancelled = false;
+    getSupabasePublicUserProject(projectId)
+      .then((row) => {
+        if (cancelled || !row) return;
+        setProject(normalizeUserProject(row));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // If editing an existing challenge, prefill plan from Supabase.

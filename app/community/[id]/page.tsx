@@ -3,17 +3,15 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getPublicProfile, type PublicProfile, type PublicCheckInEntry } from '@/lib/communityProfiles';
+import { type PublicProfile, type PublicCheckInEntry } from '@/lib/communityProfiles';
 import { getAvatarById } from '@/lib/avatarLibrary';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
-import { projects as staticProjects } from '@/app/data/projects';
-import BadgeDisplay from '@/components/profile/BadgeDisplay';
 import Card from '@/components/ui/Card';
 import ImageLightbox from '@/components/ui/ImageLightbox';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
 import { getCheckInsForUser } from '@/lib/supabase/checkIns';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 
-// Detect UUID format — Supabase auth user IDs are UUIDs; mock profile IDs are not.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function formatDate(dateStr: string): string {
@@ -41,6 +39,7 @@ export default function CommunityProfilePage() {
 
   const [profile, setProfile] = useState<PublicProfile | null | 'loading'>('loading');
   const [finishedMakes, setFinishedMakes] = useState<FinishedMake[]>([]);
+  const [projectTitleMap, setProjectTitleMap] = useState<Map<string, string>>(new Map());
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,57 +50,58 @@ export default function CommunityProfilePage() {
 
     let cancelled = false;
     (async () => {
-      // Finished makes — async fetch from Supabase.
-      getFinishedMakesByAuthor(id)
-        .then((rows) => {
-          if (!cancelled) setFinishedMakes(rows);
-        })
-        .catch(() => {
-          if (!cancelled) setFinishedMakes([]);
-        });
-
-      // If id is a UUID, the profile lives in Supabase auth.users → profiles.
-      if (UUID_RE.test(id)) {
-        try {
-          const [remote, checkIns] = await Promise.all([
-            getSupabaseProfile(id),
-            getCheckInsForUser(id, { limit: 5 }),
-          ]);
-          if (cancelled) return;
-          if (!remote) {
-            setProfile(null);
-            return;
-          }
-          const recentCheckIns: PublicCheckInEntry[] = checkIns.map((ci) => ({
-            id: ci.id,
-            message: ci.message,
-            date: ci.date,
-            displayName: ci.displayName,
-            authorId: ci.authorId,
-            imageUrl: ci.imageUrl,
-          }));
-          setProfile({
-            id: remote.id,
-            displayName: remote.nickname || 'Maker',
-            about: remote.about ?? '',
-            craftInterests: remote.craft_interests ?? [],
-            avatarId: remote.avatar_id ?? undefined,
-            avatarColor: remote.avatar_color ?? undefined,
-            publicBadges: [],     // achievements migration deferred to Phase 2.4
-            recentCheckIns,
-            finishedProjects: [], // finished-make-derived data added in Phase 2.3
-          });
-        } catch (e) {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('[CommunityProfilePage] Supabase load failed', e);
-          }
-          if (!cancelled) setProfile(null);
+      // After Phase 2.4 only Supabase UUID profiles exist.
+      if (!UUID_RE.test(id)) {
+        if (!cancelled) {
+          setProfile(null);
+          setFinishedMakes([]);
         }
         return;
       }
 
-      // Non-UUID id → fall back to mock profile lookup (Phase 2.4 removes this).
-      setProfile(getPublicProfile(id));
+      try {
+        const [remote, checkIns, makes, allProjects] = await Promise.all([
+          getSupabaseProfile(id),
+          getCheckInsForUser(id, { limit: 5 }),
+          getFinishedMakesByAuthor(id),
+          getAllPublicUserProjects(),
+        ]);
+        if (cancelled) return;
+
+        setFinishedMakes(makes);
+        const map = new Map<string, string>();
+        allProjects.forEach((p) => map.set(p.id, p.title));
+        setProjectTitleMap(map);
+
+        if (!remote) {
+          setProfile(null);
+          return;
+        }
+        const recentCheckIns: PublicCheckInEntry[] = checkIns.map((ci) => ({
+          id: ci.id,
+          message: ci.message,
+          date: ci.date,
+          displayName: ci.displayName,
+          authorId: ci.authorId,
+          imageUrl: ci.imageUrl,
+        }));
+        setProfile({
+          id: remote.id,
+          displayName: remote.nickname || 'Maker',
+          about: remote.about ?? '',
+          craftInterests: remote.craft_interests ?? [],
+          avatarId: remote.avatar_id ?? undefined,
+          avatarColor: remote.avatar_color ?? undefined,
+          publicBadges: [],
+          recentCheckIns,
+          finishedProjects: [],
+        });
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[CommunityProfilePage] Supabase load failed', e);
+        }
+        if (!cancelled) setProfile(null);
+      }
     })();
 
     return () => {
@@ -149,7 +149,6 @@ export default function CommunityProfilePage() {
       .join('')
       .slice(0, 2) || 'A';
 
-  const hasBadges = profile.publicBadges.length > 0;
   const hasCheckIns = profile.recentCheckIns.length > 0;
   const hasAbout = !!profile.about;
   const hasInterests = profile.craftInterests.length > 0;
@@ -205,34 +204,6 @@ export default function CommunityProfilePage() {
             </div>
           )}
         </Card>
-
-        {/* Community badges */}
-        {hasBadges ? (
-          <div className="rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] px-5 py-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                Community badges
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                {profile.publicBadges.length} earned
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              {profile.publicBadges.map((badge) => (
-                <BadgeDisplay key={badge.id} achievement={badge} size="small" showLabel={true} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] px-5 py-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
-              Community badges
-            </p>
-            <p className="text-sm text-[var(--color-text-muted)] italic">
-              No badges yet — sharing a check-in earns the first one.
-            </p>
-          </div>
-        )}
 
         {/* Recent updates */}
         <div className="rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)] shadow-sm">
@@ -309,11 +280,11 @@ export default function CommunityProfilePage() {
             <div>
               {finishedMakes.slice(0, 3).map((make, idx) => {
                 const coverImage = getFinishedMakeCoverImage(make);
-                const staticProj = staticProjects.find((p) => String(p.id) === make.projectId);
+                const projectTitle = projectTitleMap.get(make.projectId) ?? null;
                 // Primary text: project name > caption > personal fallback
-                const titleText = staticProj?.title ?? make.caption ?? `${profile.displayName}'s make`;
+                const titleText = projectTitle ?? make.caption ?? `${profile.displayName}'s make`;
                 // Caption as subtitle only when the project name already occupies the title slot
-                const subtitleText = staticProj && make.caption ? make.caption : null;
+                const subtitleText = projectTitle && make.caption ? make.caption : null;
                 return (
                   <div
                     key={make.id}

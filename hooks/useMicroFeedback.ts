@@ -1,21 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import {
   MicroFeedback,
   FeedbackType,
   createFeedback,
-  createAchievementUnlockedFeedback,
 } from '@/lib/microFeedback';
-import {
-  getEarnedAchievements,
-  Achievement,
-} from '@/lib/achievements';
-import {
-  getEarnedAchievementSnapshot,
-  detectUnlockedAchievement,
-  EarnedAchievementSet,
-} from '@/lib/achievementHelper';
 
 interface UseMicroFeedbackOptions {
   onFeedbackShow?: (feedback: MicroFeedback) => void;
@@ -23,49 +13,20 @@ interface UseMicroFeedbackOptions {
 }
 
 /**
- * useMicroFeedback Hook
- * Manages micro-feedback state and auto-handling of achievement unlocks
- * Use this to integrate micro-feedback into components
+ * useMicroFeedback
+ *
+ * Manages a single transient feedback toast. Phase 2.4 removed achievement
+ * unlock detection — feedback now maps 1:1 to the action that fired it.
+ * `captureAchievementSnapshot` is kept as a no-op so existing call sites
+ * don't need to be edited; it will be removed alongside the future badges
+ * rebuild.
  */
 export function useMicroFeedback(options?: UseMicroFeedbackOptions) {
   const [currentFeedback, setCurrentFeedback] = useState<MicroFeedback | null>(null);
-  const achievementSnapshotRef = useRef<EarnedAchievementSet>(getEarnedAchievementSnapshot());
 
-  /**
-   * Show feedback for an action, with smart achievement unlock detection
-   * If no achievement was just unlocked, show the action feedback
-   * If an achievement was just unlocked, show the achievement feedback instead
-   */
   const showFeedback = useCallback(
-    async (type: FeedbackType, context?: Record<string, any>) => {
+    (type: FeedbackType, context?: Record<string, unknown>) => {
       try {
-        // For actions that can unlock achievements, check for new unlocks
-        if (
-          (type === 'habit_done' ||
-            type === 'habit_missed' ||
-            type === 'challenge_joined' ||
-            type === 'challenge_archived' ||
-            type === 'public_checkin_created') &&
-          !context?.skipAchievementCheck
-        ) {
-          const unlockedAch = detectUnlockedAchievement(achievementSnapshotRef.current);
-          if (unlockedAch) {
-            // New achievement unlocked! Show that instead
-            const achievementFeedback = createAchievementUnlockedFeedback(
-              unlockedAch.title,
-              unlockedAch.emoji,
-              unlockedAch.id
-            );
-            setCurrentFeedback(achievementFeedback);
-            achievementSnapshotRef.current = getEarnedAchievementSnapshot();
-            options?.onFeedbackShow?.(achievementFeedback);
-            return;
-          }
-          // Update snapshot for next check
-          achievementSnapshotRef.current = getEarnedAchievementSnapshot();
-        }
-
-        // No new achievement, show the action feedback
         const feedback = createFeedback(type, context);
         setCurrentFeedback(feedback);
         options?.onFeedbackShow?.(feedback);
@@ -73,12 +34,9 @@ export function useMicroFeedback(options?: UseMicroFeedbackOptions) {
         console.error('Error creating feedback:', error);
       }
     },
-    [options]
+    [options],
   );
 
-  /**
-   * Manually dismiss current feedback
-   */
   const dismissFeedback = useCallback(() => {
     if (currentFeedback) {
       options?.onFeedbackDismiss?.(currentFeedback.id);
@@ -86,23 +44,18 @@ export function useMicroFeedback(options?: UseMicroFeedbackOptions) {
     setCurrentFeedback(null);
   }, [currentFeedback, options]);
 
-  /**
-   * Manually set feedback (for special cases)
-   */
-  const setFeedback = useCallback((feedback: MicroFeedback | null) => {
-    setCurrentFeedback(feedback);
-    if (feedback) {
-      options?.onFeedbackShow?.(feedback);
-    }
-  }, [options]);
+  const setFeedback = useCallback(
+    (feedback: MicroFeedback | null) => {
+      setCurrentFeedback(feedback);
+      if (feedback) {
+        options?.onFeedbackShow?.(feedback);
+      }
+    },
+    [options],
+  );
 
-  /**
-   * Update the achievement snapshot (call this at the start of an action flow)
-   * to establish a baseline for unlock detection
-   */
-  const captureAchievementSnapshot = useCallback(() => {
-    achievementSnapshotRef.current = getEarnedAchievementSnapshot();
-  }, []);
+  // Legacy no-op for backward compatibility — see file header.
+  const captureAchievementSnapshot = useCallback(() => {}, []);
 
   return {
     currentFeedback,

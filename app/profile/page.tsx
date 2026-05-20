@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
-import { getProfileData, saveProfileData, ProfileData } from '@/lib/profile';
+import { getProfileData, saveProfileData, clearProfileData, ProfileData } from '@/lib/profile';
 import {
   getCurrentHabitStreak,
   getBestHabitStreak,
@@ -12,7 +13,6 @@ import {
 } from '@/lib/habitStats';
 import { getUserProjects, type UserProject } from '@/lib/userProjects';
 import ProfileHeader from '@/components/profile/ProfileHeader';
-import ProfileAchievements from '@/components/profile/ProfileAchievements';
 import ProfileStats from '@/components/profile/ProfileStats';
 import ProfileActivity from '@/components/profile/ProfileActivity';
 import ProfileProjects from '@/components/profile/ProfileProjects';
@@ -22,7 +22,6 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { getSupabaseProfile, upsertSupabaseProfile, type SupabaseProfile } from '@/lib/supabase/profiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
-import { projects as staticProjects } from '@/app/data/projects';
 import {
   getActiveChallenges,
   getArchivedChallenges,
@@ -52,6 +51,7 @@ function mergeSupabaseIntoLocal(local: ProfileData, remote: SupabaseProfile): Pr
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -120,39 +120,6 @@ export default function ProfilePage() {
         setLast7DaysRate(l7r);
         setPublicCheckIns(myCheckIns);
         setMyMakes(myMakesRows);
-
-        // Mirror current user's check-ins to legacy localStorage so the
-        // achievements module sees them. Phase 2.4 removes this.
-        try {
-          localStorage.setItem(
-            'publicCheckIns',
-            JSON.stringify(
-              myCheckIns.map((ci) => ({
-                id: ci.id,
-                challengeId: ci.challengeId,
-                date: ci.date,
-                message: ci.message,
-                displayName: ci.displayName,
-                authorId: ci.authorId,
-                authorAvatarId: ci.authorAvatarId,
-                imageUrl: ci.imageUrl,
-              })),
-            ),
-          );
-        } catch {}
-
-        // Mirror to legacy localStorage keys for the achievements module.
-        // Phase 2.4 removes this once achievements are migrated.
-        try {
-          localStorage.setItem('activeChallenges', JSON.stringify(active));
-          localStorage.setItem('archivedChallenges', JSON.stringify(archived));
-          localStorage.setItem('habitLogs', JSON.stringify(logs));
-          if (habit) {
-            localStorage.setItem('activeHabit', JSON.stringify(habit));
-          } else {
-            localStorage.removeItem('activeHabit');
-          }
-        } catch {}
       } catch (e) {
         if (process.env.NODE_ENV === 'development') {
           console.warn('[ProfilePage] Supabase load failed', e);
@@ -171,7 +138,11 @@ export default function ProfilePage() {
     supabase.auth.getUser().then(async ({ data }) => {
       if (cancelled) return;
       if (!data.user) {
-        setSupabaseLoading(false);
+        // Anonymous visitors don't have a profile — send them to the welcome
+        // screen. Also clear any leftover localStorage profile cache from a
+        // previous signed-in session on this device.
+        clearProfileData();
+        router.push('/');
         return;
       }
       setUserId(data.user.id);
@@ -188,11 +159,17 @@ export default function ProfilePage() {
       }
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [router]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    // Clear the local profile cache so the next visitor doesn't see the
+    // previous user's nickname/avatar leaking through localStorage.
+    clearProfileData();
     setUserId(null);
+    // Send the user to the welcome screen, which renders AuthPanel for
+    // signed-out visitors.
+    router.push('/');
   };
 
   const handleSaveProfile = (data: ProfileData) => {
@@ -298,8 +275,6 @@ export default function ProfilePage() {
             onEdit={() => setIsEditModalOpen(true)}
           />
 
-          <ProfileAchievements />
-
           <ProfileStats
             activeChallengesCount={activeChallengesCount}
             archivedChallengesCount={archivedChallengesCount}
@@ -332,9 +307,7 @@ export default function ProfilePage() {
                 {myMakes.slice(0, 3).map((make) => {
                   const coverImage = getFinishedMakeCoverImage(make);
                   const resolvedProject =
-                    staticProjects.find((p) => String(p.id) === make.projectId) ??
-                    userProjects.find((p) => p.id === make.projectId) ??
-                    null;
+                    userProjects.find((p) => p.id === make.projectId) ?? null;
                   // Primary text: project name > caption > warm personal fallback
                   const titleText = resolvedProject?.title ?? make.caption ?? 'My make';
                   // Caption as subtitle only when the project name already holds the title slot

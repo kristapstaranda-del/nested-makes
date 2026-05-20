@@ -1,10 +1,10 @@
 /**
  * Micro-Feedback System
- * Generates lightweight, warm, inline feedback messages for user actions
- * No notifications, no aggressive gamification — just gentle encouragement
+ *
+ * Generates lightweight, warm, inline feedback messages for user actions.
+ * Phase 2.4: the `achievement_unlocked` branch was retired along with the
+ * legacy achievements module; badges will be rebuilt as a separate feature.
  */
-
-import { getBadgeCatalogEntry } from './badgeCatalog';
 
 export type FeedbackType =
   | 'habit_started'
@@ -15,7 +15,6 @@ export type FeedbackType =
   | 'challenge_updated'
   | 'challenge_archived'
   | 'profile_updated'
-  | 'achievement_unlocked'
   | 'finished_make_submitted';
 
 export type FeedbackTone = 'celebration' | 'encouragement' | 'gentle';
@@ -27,13 +26,9 @@ export interface MicroFeedback {
   message: string;
   emoji: string;
   tone: FeedbackTone;
-  relatedAchievementId?: string;
   displayDuration?: number; // milliseconds, default 4000
 }
 
-/**
- * Generate a unique feedback ID
- */
 function generateFeedbackId(): string {
   return `feedback_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
@@ -42,12 +37,10 @@ function generateFeedbackId(): string {
  * Create feedback for habit completion.
  * Accepts optional streak context to return milestone-aware copy at 3, 5, and 7+ days.
  * Accepts optional bounceBack flag to return warmer copy when the previous log was missed.
- * Bounce-back is checked first; streak milestones apply only when bounceBack is false/absent.
  */
 export function createHabitDoneFeedback(context?: { streak?: number; bounceBack?: boolean }): MicroFeedback {
   const streak = context?.streak;
 
-  // Bounce-back: user returned after a missed day — warm, no pressure, no hype
   if (context?.bounceBack) {
     const messages = [
       { title: 'Glad you came back',  message: "A pause doesn't erase your progress.", emoji: '🌿' },
@@ -66,7 +59,6 @@ export function createHabitDoneFeedback(context?: { streak?: number; bounceBack?
     };
   }
 
-  // Check milestones descending so a 7-day streak doesn't match the 3-day branch
   if (streak !== undefined && streak >= 7) {
     const messages = [
       { title: 'A week of showing up',   message: 'That matters more than it seems.',             emoji: '🌟' },
@@ -121,7 +113,6 @@ export function createHabitDoneFeedback(context?: { streak?: number; bounceBack?
     };
   }
 
-  // Generic fallback — no streak context, or streak below the first milestone
   const messages = [
     { title: 'Nice work!',  message: 'Consistency builds mastery',      emoji: '💛' },
     { title: 'You did it!', message: 'Keep the momentum going',         emoji: '🎯' },
@@ -141,20 +132,15 @@ export function createHabitDoneFeedback(context?: { streak?: number; bounceBack?
   };
 }
 
-/**
- * Create feedback for habit miss
- */
 export function createHabitMissedFeedback(): MicroFeedback {
   const messages = [
-    { title: 'That\'s okay', message: 'Tomorrow is a fresh start', emoji: '🌱' },
+    { title: "That's okay", message: 'Tomorrow is a fresh start', emoji: '🌱' },
     { title: 'No worries', message: 'Every day is a new chance', emoji: '🌅' },
-    { title: 'All good', message: 'Progress isn\'t always linear', emoji: '💙' },
-    { title: 'Be kind to yourself', message: 'You\'ll get the next one', emoji: '🤗' },
-    { title: 'Keep going', message: 'One miss doesn\'t break the momentum', emoji: '💪' },
+    { title: 'All good', message: "Progress isn't always linear", emoji: '💙' },
+    { title: 'Be kind to yourself', message: "You'll get the next one", emoji: '🤗' },
+    { title: 'Keep going', message: "One miss doesn't break the momentum", emoji: '💪' },
   ];
-
   const picked = messages[Math.floor(Math.random() * messages.length)];
-
   return {
     id: generateFeedbackId(),
     type: 'habit_missed',
@@ -166,9 +152,6 @@ export function createHabitMissedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for habit started
- */
 export function createHabitStartedFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -181,9 +164,6 @@ export function createHabitStartedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for challenge updated
- */
 export function createChallengeUpdatedFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -196,19 +176,14 @@ export function createChallengeUpdatedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for public check-in created
- */
 export function createPublicCheckInFeedback(): MicroFeedback {
   const messages = [
     { title: 'Shared!', message: 'The community loves seeing your progress', emoji: '✨' },
-    { title: 'Posted!', message: 'You\'re inspiring others', emoji: '💬' },
+    { title: 'Posted!', message: "You're inspiring others", emoji: '💬' },
     { title: 'Check-in sent!', message: 'Thanks for sharing your journey', emoji: '🎨' },
     { title: 'Awesome!', message: 'Your update is live', emoji: '🌟' },
   ];
-
   const picked = messages[Math.floor(Math.random() * messages.length)];
-
   return {
     id: generateFeedbackId(),
     type: 'public_checkin_created',
@@ -220,9 +195,6 @@ export function createPublicCheckInFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for challenge joined
- */
 export function createChallengeJoinedFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -235,9 +207,6 @@ export function createChallengeJoinedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for challenge archived (completed)
- */
 export function createChallengeArchivedFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -250,9 +219,6 @@ export function createChallengeArchivedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for profile updates
- */
 export function createProfileUpdatedFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -265,37 +231,6 @@ export function createProfileUpdatedFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Create feedback for achievement unlocked.
- * Uses the achievement's name as the title and its unlockLabel from the badge
- * catalog as the message, so the copy is specific and warm rather than generic.
- * @param achievementTitle - The title of the unlocked achievement
- * @param achievementEmoji - The emoji of the unlocked achievement
- * @param achievementId - The ID of the achievement
- */
-export function createAchievementUnlockedFeedback(
-  achievementTitle: string,
-  achievementEmoji: string,
-  achievementId: string
-): MicroFeedback {
-  const catalogEntry = getBadgeCatalogEntry(achievementId);
-  const message = catalogEntry?.unlockLabel ?? 'A new badge joined your collection.';
-
-  return {
-    id: generateFeedbackId(),
-    type: 'achievement_unlocked',
-    title: achievementTitle,
-    message,
-    emoji: achievementEmoji,
-    tone: 'celebration',
-    relatedAchievementId: achievementId,
-    displayDuration: 5000,
-  };
-}
-
-/**
- * Create feedback for finished make submitted
- */
 export function createFinishedMakeFeedback(): MicroFeedback {
   return {
     id: generateFeedbackId(),
@@ -308,10 +243,7 @@ export function createFinishedMakeFeedback(): MicroFeedback {
   };
 }
 
-/**
- * Factory function to create feedback by type
- */
-export function createFeedback(type: FeedbackType, context?: Record<string, any>): MicroFeedback {
+export function createFeedback(type: FeedbackType, context?: Record<string, unknown>): MicroFeedback {
   switch (type) {
     case 'habit_done':
       return createHabitDoneFeedback({
@@ -334,24 +266,13 @@ export function createFeedback(type: FeedbackType, context?: Record<string, any>
       return createProfileUpdatedFeedback();
     case 'finished_make_submitted':
       return createFinishedMakeFeedback();
-    case 'achievement_unlocked':
-      if (!context?.achievementTitle || !context?.achievementEmoji || !context?.achievementId) {
-        throw new Error('achievement_unlocked requires context with achievementTitle, achievementEmoji, and achievementId');
-      }
-      return createAchievementUnlockedFeedback(
-        context.achievementTitle,
-        context.achievementEmoji,
-        context.achievementId
-      );
-    default:
+    default: {
       const _exhaustive: never = type;
       return _exhaustive;
+    }
   }
 }
 
-/**
- * Get CSS classes for styling based on tone
- */
 export function getFeedbackToneClasses(tone: FeedbackTone): {
   container: string;
   icon: string;
@@ -380,8 +301,9 @@ export function getFeedbackToneClasses(tone: FeedbackTone): {
         text: 'text-[var(--color-success)]',
         badge: 'bg-[var(--color-success-soft)] text-[var(--color-success)]',
       };
-    default:
+    default: {
       const _exhaustive: never = tone;
       return _exhaustive;
+    }
   }
 }

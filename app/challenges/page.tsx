@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { projects } from '@/app/data/projects';
-import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
-import { MOCK_PROFILES } from '@/lib/communityProfiles';
+import { normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 import { useMicroFeedback } from '@/hooks/useMicroFeedback';
 import InlineFeedback from '@/components/feedback/InlineFeedback';
 import SectionHeader from '@/components/ui/SectionHeader';
@@ -65,7 +64,7 @@ export default function ChallengesPage() {
   const [showAllArchived, setShowAllArchived] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   // Merged project lookup: static curated + user-created (populated in useEffect)
-  const [allProjects, setAllProjects] = useState<DiscoverProject[]>(projects as DiscoverProject[]);
+  const [allProjects, setAllProjects] = useState<DiscoverProject[]>([]);
   const [authorName, setAuthorName] = useState('Maker');
   const [authorAvatarId, setAuthorAvatarId] = useState<string | undefined>(undefined);
   const { status: authStatus } = useAuthStatus();
@@ -181,11 +180,18 @@ export default function ChallengesPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Merged project list (static + local user cache) — fast lookup for cards.
-  // Loaded synchronously so cards render even before Supabase queries finish.
+  // Pre-load all public user projects so challenge cards can render titles,
+  // categories, and cover images for any author.
   useEffect(() => {
-    const userProjs = getUserProjects().map(normalizeUserProject);
-    setAllProjects([...(projects as DiscoverProject[]), ...userProjs]);
+    let cancelled = false;
+    getAllPublicUserProjects()
+      .then((rows) => {
+        if (!cancelled) setAllProjects(rows.map(normalizeUserProject));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Feedback flags (set by setup pages on redirect) — read once on mount.
@@ -247,23 +253,6 @@ export default function ChallengesPage() {
       cancelled = true;
     };
   }, [authStatus]);
-
-  // Mirror Supabase state to legacy localStorage keys so the achievements
-  // module (lib/achievements.ts) continues to compute earned badges against
-  // fresh data. Phase 2.4 will remove this once achievements are migrated.
-  useEffect(() => {
-    if (authStatus !== 'authenticated' || isLoading) return;
-    try {
-      localStorage.setItem('activeChallenges', JSON.stringify(activeChallenges));
-      localStorage.setItem('archivedChallenges', JSON.stringify(archivedChallenges));
-      localStorage.setItem('habitLogs', JSON.stringify(habitLogs));
-      if (activeHabit) {
-        localStorage.setItem('activeHabit', JSON.stringify(activeHabit));
-      } else {
-        localStorage.removeItem('activeHabit');
-      }
-    } catch {}
-  }, [activeChallenges, archivedChallenges, activeHabit, habitLogs, authStatus, isLoading]);
 
   // Load check-ins from Supabase for the active challenges in one batched
   // query. Runs whenever the active challenge list changes (e.g. after
@@ -718,26 +707,6 @@ export default function ChallengesPage() {
         [challenge.challengeId]: [saved, ...(map[challenge.challengeId] || [])],
       }));
 
-      // Mirror to legacy localStorage so lib/achievements.ts can detect
-      // community badges (community-spark, chatty-crafter). Phase 2.4 removes.
-      try {
-        const raw = localStorage.getItem('publicCheckIns');
-        const arr = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(arr)) {
-          arr.push({
-            id: saved.id,
-            challengeId: saved.challengeId,
-            date: saved.date,
-            message: saved.message,
-            displayName: saved.displayName,
-            authorId: saved.authorId,
-            authorAvatarId: saved.authorAvatarId,
-            imageUrl: saved.imageUrl,
-          });
-          localStorage.setItem('publicCheckIns', JSON.stringify(arr));
-        }
-      } catch {}
-
       setCheckInMessages((m) => ({ ...m, [challenge.challengeId]: '' }));
       setCheckInImages((imgs) => {
         const next = { ...imgs };
@@ -977,48 +946,6 @@ export default function ChallengesPage() {
                 description="Completed challenges will appear here as part of your progress history."
               />
             )}
-          </div>
-        </div>
-
-        {/* Community section */}
-        <div className="mt-10">
-          <SectionHeader
-            title="Community"
-            subtitle="A few crafters making progress. Tap a name to see their profile."
-          />
-          <div className="mt-4 space-y-3">
-            {MOCK_PROFILES.map((member) => {
-              const initials = member.displayName
-                .split(' ')
-                .map((w) => w.charAt(0).toUpperCase())
-                .join('')
-                .slice(0, 2);
-              const latestUpdate = member.recentCheckIns[0];
-              return (
-                <Link key={member.id} href={`/community/${member.id}`}>
-                  <Card className="hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="flex h-10 w-10 flex-none items-center justify-center rounded-full text-sm font-semibold text-white"
-                        style={{ backgroundColor: member.avatarColor ?? '#6E8F7A' }}
-                      >
-                        {initials}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-[var(--color-text-primary)]">
-                          {member.displayName}
-                        </p>
-                        {latestUpdate && (
-                          <p className="mt-0.5 text-xs text-[var(--color-text-muted)] truncate">
-                            {latestUpdate.message.slice(0, 55)}{latestUpdate.message.length > 55 ? '…' : ''}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
-                </Link>
-              );
-            })}
           </div>
         </div>
 

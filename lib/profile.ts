@@ -50,3 +50,16 @@ export function saveProfileData(data: ProfileData): void {
     // Ignore storage errors
   }
 }
+
+/**
+ * Clear the local profile cache. Called on logout so the next signed-in user
+ * (or anonymous visitor) doesn't see the previous user's nickname/avatar.
+ */
+export function clearProfileData(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem('profileData');
+  } catch {
+    // Ignore storage errors
+  }
+}

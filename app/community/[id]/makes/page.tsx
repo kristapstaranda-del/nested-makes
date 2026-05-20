@@ -3,18 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getPublicProfile, type PublicProfile } from '@/lib/communityProfiles';
+import { type PublicProfile } from '@/lib/communityProfiles';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
-import { projects as staticProjects } from '@/app/data/projects';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 import Card from '@/components/ui/Card';
 import ImageLightbox from '@/components/ui/ImageLightbox';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function getProjectTitle(projectId: string): string | null {
-  return staticProjects.find((p) => String(p.id) === projectId)?.title ?? null;
-}
 
 export default function CommunityMakesPage() {
   const params = useParams();
@@ -22,7 +18,11 @@ export default function CommunityMakesPage() {
 
   const [profile, setProfile] = useState<PublicProfile | null | 'loading'>('loading');
   const [makes, setMakes] = useState<FinishedMake[]>([]);
+  const [projectTitleMap, setProjectTitleMap] = useState<Map<string, string>>(new Map());
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  const getProjectTitle = (projectId: string): string | null =>
+    projectTitleMap.get(projectId) ?? null;
 
   useEffect(() => {
     if (!id) {
@@ -31,36 +31,48 @@ export default function CommunityMakesPage() {
     }
     let cancelled = false;
     (async () => {
-      // Resolve profile: UUID → Supabase, otherwise mock fallback.
-      if (UUID_RE.test(id)) {
-        try {
-          const remote = await getSupabaseProfile(id);
-          if (cancelled) return;
-          if (!remote) {
-            setProfile(null);
-          } else {
-            setProfile({
-              id: remote.id,
-              displayName: remote.nickname || 'Maker',
-              about: remote.about ?? '',
-              craftInterests: remote.craft_interests ?? [],
-              avatarId: remote.avatar_id ?? undefined,
-              avatarColor: remote.avatar_color ?? undefined,
-              publicBadges: [],
-              recentCheckIns: [],
-              finishedProjects: [],
-            });
-          }
-        } catch {
-          if (!cancelled) setProfile(null);
+      // After Phase 2.4 only Supabase UUID profiles exist.
+      if (!UUID_RE.test(id)) {
+        if (!cancelled) {
+          setProfile(null);
+          setMakes([]);
         }
-      } else {
-        setProfile(getPublicProfile(id));
+        return;
       }
 
       try {
-        const rows = await getFinishedMakesByAuthor(id);
-        if (!cancelled) setMakes(rows);
+        const remote = await getSupabaseProfile(id);
+        if (cancelled) return;
+        if (!remote) {
+          setProfile(null);
+        } else {
+          setProfile({
+            id: remote.id,
+            displayName: remote.nickname || 'Maker',
+            about: remote.about ?? '',
+            craftInterests: remote.craft_interests ?? [],
+            avatarId: remote.avatar_id ?? undefined,
+            avatarColor: remote.avatar_color ?? undefined,
+            publicBadges: [],
+            recentCheckIns: [],
+            finishedProjects: [],
+          });
+        }
+      } catch {
+        if (!cancelled) setProfile(null);
+      }
+
+      try {
+        const [rows, allProjects] = await Promise.all([
+          getFinishedMakesByAuthor(id),
+          getAllPublicUserProjects(),
+        ]);
+        if (!cancelled) {
+          setMakes(rows);
+          const map = new Map<string, string>();
+          allProjects.forEach((p) => map.set(p.id, p.title));
+          setProjectTitleMap(map);
+        }
       } catch {
         if (!cancelled) setMakes([]);
       }

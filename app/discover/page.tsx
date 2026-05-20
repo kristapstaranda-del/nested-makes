@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { projects } from '@/app/data/projects';
-import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 import { getProjectSignals, type ProjectSignalsMap } from '@/lib/projectSignals';
 import ProjectCard from '@/components/ui/ProjectCard';
 import SectionHeader from '@/components/ui/SectionHeader';
@@ -11,11 +11,9 @@ import EmptyState from '@/components/ui/EmptyState';
 import Chip from '@/components/ui/Chip';
 import Button from '@/components/ui/Button';
 
-// Static curated projects already match DiscoverProject shape (minus isUserProject)
-const curatedProjects: DiscoverProject[] = projects;
-
-// Canonical curated category list — order and spelling are intentional.
-// User-created categories may be appended after this list (see useEffect below).
+// Canonical seed category list — keeps the filter chips stable even before any
+// public user projects exist. Extra categories from user-created projects are
+// appended after hydration.
 const CURATED_CATEGORIES = [
   'Knitting', 'Crochet', 'Beading', 'Weaving', 'Embroidery',
   'Sewing', 'Pottery', 'Painting', 'DIY Crafts',
@@ -37,29 +35,40 @@ export default function DiscoverPage() {
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [sortMode, setSortMode] = useState('All');
   const [signals, setSignals] = useState<ProjectSignalsMap>({});
-  const [allProjects, setAllProjects] = useState<DiscoverProject[]>(curatedProjects);
+  const [allProjects, setAllProjects] = useState<DiscoverProject[]>([]);
   // Start with only curated categories; user categories are appended after hydration.
   const [categories, setCategories] = useState<string[]>(['All', ...CURATED_CATEGORIES]);
 
   useEffect(() => {
     setSignals(getProjectSignals());
-    const userProjects = getUserProjects().map(normalizeUserProject);
-    // User projects appear at the top so they're immediately visible
-    setAllProjects([...userProjects, ...curatedProjects]);
 
-    // Augment the category list with any valid categories from user projects
-    // that aren't already covered by the curated list.
-    const curatedSet = new Set(CURATED_CATEGORIES.map(c => c.toLowerCase()));
-    const extras = new Set<string>();
-    userProjects.forEach(p => {
-      const normalized = normalizeCategory(p.craftType);
-      if (normalized && !curatedSet.has(normalized.toLowerCase())) {
-        extras.add(normalized);
-      }
-    });
-    if (extras.size > 0) {
-      setCategories(['All', ...CURATED_CATEGORIES, ...[...extras].sort()]);
-    }
+    let cancelled = false;
+    getAllPublicUserProjects()
+      .then((rows) => {
+        if (cancelled) return;
+        const normalized = rows.map(normalizeUserProject);
+        setAllProjects(normalized);
+
+        // Augment the category list with any valid categories from user projects
+        // that aren't already covered by the curated list.
+        const curatedSet = new Set(CURATED_CATEGORIES.map((c) => c.toLowerCase()));
+        const extras = new Set<string>();
+        normalized.forEach((p) => {
+          const nc = normalizeCategory(p.craftType);
+          if (nc && !curatedSet.has(nc.toLowerCase())) extras.add(nc);
+        });
+        if (extras.size > 0) {
+          setCategories(['All', ...CURATED_CATEGORIES, ...[...extras].sort()]);
+        }
+      })
+      .catch((e) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[DiscoverPage] load failed', e);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const difficulties = ['All', 'Beginner', 'Intermediate', 'Advanced'];
@@ -209,37 +218,21 @@ export default function DiscoverPage() {
             />
           ) : (
             <>
-              {sortedProjects.map((project, idx) => {
+              {sortedProjects.map((project) => {
                 const sig = signals[project.id];
-                // In default sort order, user projects always appear first.
-                // Show a soft "From the library" divider at the transition point
-                // so the two groups are gently distinguished without loud badges.
-                const showLibraryDivider =
-                  sortMode === 'All' &&
-                  !project.isUserProject &&
-                  idx > 0 &&
-                  sortedProjects[idx - 1].isUserProject;
                 return (
-                  <React.Fragment key={project.id}>
-                    {showLibraryDivider && (
-                      <div className="flex items-center gap-3 py-1">
-                        <div className="h-px flex-1 bg-[var(--color-border-subtle)]" />
-                        <span className="text-xs text-[var(--color-text-muted)]">From the library</span>
-                        <div className="h-px flex-1 bg-[var(--color-border-subtle)]" />
-                      </div>
-                    )}
-                    <ProjectCard
-                      id={project.id}
-                      title={project.title}
-                      craftType={project.craftType}
-                      difficulty={project.difficulty}
-                      description={project.description}
-                      makersCount={sig?.makersCount}
-                      finishedCount={sig?.finishedCount}
-                      isUserProject={project.isUserProject}
-                      coverImage={project.coverImage}
-                    />
-                  </React.Fragment>
+                  <ProjectCard
+                    key={project.id}
+                    id={project.id}
+                    title={project.title}
+                    craftType={project.craftType}
+                    difficulty={project.difficulty}
+                    description={project.description}
+                    makersCount={sig?.makersCount}
+                    finishedCount={sig?.finishedCount}
+                    isUserProject={project.isUserProject}
+                    coverImage={project.coverImage}
+                  />
                 );
               })}
             </>

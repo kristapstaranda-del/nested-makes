@@ -4,21 +4,17 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getFinishedMakesByAuthor, getFinishedMakeCoverImage, type FinishedMake } from '@/lib/finishedMakes';
 import { supabase } from '@/lib/supabase/client';
-import { projects as staticProjects } from '@/app/data/projects';
-import { getUserProjects } from '@/lib/userProjects';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 import ImageLightbox from '@/components/ui/ImageLightbox';
-
-function getProjectTitle(projectId: string): string | null {
-  const staticProj = staticProjects.find((p) => String(p.id) === projectId);
-  if (staticProj) return staticProj.title;
-  const userProj = getUserProjects().find((p) => p.id === projectId);
-  return userProj?.title ?? null;
-}
 
 export default function MyMakesPage() {
   const [makes, setMakes] = useState<FinishedMake[]>([]);
+  const [projectTitleMap, setProjectTitleMap] = useState<Map<string, string>>(new Map());
   const [loaded, setLoaded] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+
+  const getProjectTitle = (projectId: string): string | null =>
+    projectTitleMap.get(projectId) ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -32,9 +28,15 @@ export default function MyMakesPage() {
           }
           return;
         }
-        const rows = await getFinishedMakesByAuthor(data.user.id);
+        const [rows, allProjects] = await Promise.all([
+          getFinishedMakesByAuthor(data.user.id),
+          getAllPublicUserProjects(),
+        ]);
         if (!cancelled) {
           setMakes(rows);
+          const map = new Map<string, string>();
+          allProjects.forEach((p) => map.set(p.id, p.title));
+          setProjectTitleMap(map);
           setLoaded(true);
         }
       } catch (e) {

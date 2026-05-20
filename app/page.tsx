@@ -6,8 +6,8 @@ import { useRouter } from 'next/navigation';
 import { type AuthUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import AuthPanel from '@/components/auth/AuthPanel';
-import { projects as staticProjects } from '@/app/data/projects';
-import { getUserProjects, normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { normalizeUserProject, type DiscoverProject } from '@/lib/userProjects';
+import { getAllPublicUserProjects } from '@/lib/supabase/userProjects';
 import { getProfileData } from '@/lib/profile';
 import { getSupabaseProfile } from '@/lib/supabase/profiles';
 import { getActiveChallenges, type ActiveChallenge } from '@/lib/supabase/challenges';
@@ -23,7 +23,7 @@ export default function TodayPage() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
-  const [allProjects, setAllProjects] = useState<DiscoverProject[]>(staticProjects as DiscoverProject[]);
+  const [allProjects, setAllProjects] = useState<DiscoverProject[]>([]);
   const [profileName, setProfileName] = useState('');
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
@@ -84,8 +84,15 @@ export default function TodayPage() {
     const profile = getProfileData();
     setProfileName(profile.nickname || '');
 
-    const userProjs = getUserProjects().map(normalizeUserProject);
-    setAllProjects([...(staticProjects as DiscoverProject[]), ...userProjs]);
+    getAllPublicUserProjects()
+      .then((rows) => {
+        if (!cancelled) setAllProjects(rows.map(normalizeUserProject));
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[TodayPage] getAllPublicUserProjects failed', err);
+        }
+      });
 
     // Check-in stats for momentum + per-challenge counts — pulled from Supabase
     (async () => {

@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { projects as staticProjects } from '@/app/data/projects';
 import { getUserProjects } from '@/lib/userProjects';
+import { getSupabasePublicUserProject } from '@/lib/supabase/userProjects';
 import {
   getFinishedMakesForProject,
   getFinishedMakeCoverImage,
@@ -25,13 +25,16 @@ export default function ProjectMakesPage() {
 
   useEffect(() => {
     if (!id) return;
-    // Resolve project title (sync from local data sources)
-    const staticProj = staticProjects.find((p) => String(p.id) === id);
-    if (staticProj) {
-      setProjectTitle(staticProj.title);
+    // Resolve project title — local cache first, then Supabase fallback.
+    const local = getUserProjects().find((p) => p.id === id);
+    if (local) {
+      setProjectTitle(local.title);
     } else {
-      const userProj = getUserProjects().find((p) => p.id === id);
-      if (userProj) setProjectTitle(userProj.title);
+      getSupabasePublicUserProject(id)
+        .then((row) => {
+          if (row) setProjectTitle(row.title);
+        })
+        .catch(() => {});
     }
 
     let cancelled = false;

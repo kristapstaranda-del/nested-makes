@@ -3,7 +3,6 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { projects } from '../../data/projects';
 import { getUserProjects, deleteUserProject, cacheUserProjectLocally, removeUserProjectFromCache, getProjectCoverImage, type UserProject } from '@/lib/userProjects';
 import { getSupabaseUserProject, deleteSupabaseUserProject, isUuid } from '@/lib/supabase/userProjects';
 import { supabase } from '@/lib/supabase/client';
@@ -53,7 +52,9 @@ export default function ProjectPage() {
   const router = useRouter();
   const id = typeof params.id === 'string' ? params.id : '';
 
-  const staticProject = projects.find((p) => String(p.id) === id);
+  // After Phase 2.4 all projects live in user_projects (Supabase). The
+  // "staticProject" path is gone — every project is treated as a user project.
+  const staticProject: null = null;
 
   // ── Active challenge detection ─────────────────────────────────────────────
   // First render uses the legacy localStorage mirror written by /challenges so
@@ -417,41 +418,7 @@ export default function ProjectPage() {
     </Link>
   );
 
-  // ── Static curated project ─────────────────────────────────────────────────
-  if (staticProject) {
-    return (
-      <div className="min-h-screen bg-canvas">
-        <div className="mx-auto max-w-[430px] px-4 pt-6 pb-24">
-          {backLink}
-          <Card className="p-5">
-            <div className="flex items-start gap-4">
-              <ProjectCategoryIcon category={staticProject.craftType} size="lg" />
-              <div className="flex-1 min-w-0">
-                <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">{staticProject.title}</h1>
-                <p className="mt-1 text-sm font-medium text-[var(--color-text-secondary)]">{staticProject.craftType}</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Chip label={staticProject.difficulty} variant={difficultyVariant(staticProject.difficulty)} />
-                  <Chip label="Project" variant="neutral" />
-                  {isActive && <Chip label="In progress" variant="success" />}
-                </div>
-              </div>
-            </div>
-            <div className="mt-5">
-              <h2 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide">What you'll make</h2>
-              <p className="mt-2 text-[var(--color-text-primary)] leading-relaxed">{staticProject.description}</p>
-            </div>
-          </Card>
-          <div className="mt-6">
-            {isActive ? renderActiveWorkspace() : <StartChallengeButton projectId={staticProject.id} />}
-          </div>
-          {renderFinishedMakesSection()}
-        </div>
-        {makesLightboxSrc && (
-          <ImageLightbox src={makesLightboxSrc} onClose={() => setMakesLightboxSrc(null)} />
-        )}
-      </div>
-    );
-  }
+  // Phase 2.4: static-curated branch retired — every project is a user project.
 
   // ── Loading (user project lookup pending) ──────────────────────────────────
   if (loading) {
